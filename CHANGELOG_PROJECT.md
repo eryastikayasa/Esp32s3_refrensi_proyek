@@ -261,6 +261,33 @@ Tujuannya mencegah realtime audio memegang/menunggu lock WebSocket selama bebera
 
 ---
 
+## v7.0.28 — WebSocket PING Lock Diagnostic — August 20, 2026
+
+Setelah firmware OLED-OFF masih berhenti merespons dan menghasilkan:
+
+```text
+E (41374) websocket_client: Could not lock ws-client within 2000 timeout for PING
+```
+
+dilakukan eksperimen diagnostik berikutnya.
+
+### Perubahan
+- Jalur **WebSocket PING/keep-alive dinonaktifkan sementara** untuk pengujian.
+- Eksperimen dibuat sesempit mungkin agar tidak mengubah jalur audio.
+- Audio TX, RX worker, ring buffer playback, I2S, MAX98357A, dan volume processing **tidak diubah**.
+
+### Tujuan
+Membuktikan apakah proses PING/keep-alive merupakan pemicu kondisi WebSocket macet atau hanya korban dari lock yang sudah lebih dulu tertahan.
+
+### Cara membaca hasil test
+- Jika setelah PING dinonaktifkan sistem tidak lagi diam, jalur PING/keep-alive menjadi kandidat kuat penyebab.
+- Jika sistem tetap diam, investigasi dilanjutkan ke lock/lifecycle WebSocket dan TX audio.
+
+### Status
+**DIAGNOSTIC TEST — WAITING FOR RUNTIME RESULT**
+
+---
+
 ## Audio Tuning — Current Phase
 
 Setelah koneksi Gemini berhasil, pekerjaan difokuskan pada tuning audio/runtime berdasarkan log aktual.
@@ -272,7 +299,7 @@ Setelah koneksi Gemini berhasil, pekerjaan difokuskan pada tuning audio/runtime 
 - Perubahan eksperimen harus diverifikasi melalui build dan runtime log sebelum dianggap sebagai baseline baru.
 
 ### Status
-**IN PROGRESS — WEBSOCKET TX LOCK TEST**
+**IN PROGRESS — WEBSOCKET LOCK / KEEP-ALIVE DIAGNOSTIC**
 
 ---
 
@@ -285,9 +312,9 @@ Per 20 Agustus 2026:
 3. Pemrosesan perintah volume masih dinonaktifkan untuk uji kestabilan.
 4. OLED/I2C dinonaktifkan sementara dan timeout I2C sudah hilang dari runtime.
 5. Masalah terbaru mengarah ke WebSocket client lock saat PING.
-6. TX audio sekarang dibatasi timeout 250 ms agar tidak memonopoli lock terlalu lama.
-7. Test berikutnya harus melihat apakah PING lock error dan kondisi diam hilang.
-8. Jika masih bermasalah, lanjutkan bedah lifecycle/control WebSocket tanpa mengubah audio baseline.
+6. TX audio sebelumnya sudah dibatasi timeout 250 ms agar tidak memonopoli lock terlalu lama.
+7. Eksperimen berikutnya menonaktifkan PING/keep-alive sementara.
+8. Hasil test PING-OFF akan menentukan apakah kita fokus ke keep-alive atau kembali membedah TX/lifecycle WebSocket.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
