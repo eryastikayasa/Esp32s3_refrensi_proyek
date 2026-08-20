@@ -165,14 +165,45 @@ Masalah I2C/OLED dipisahkan dari audio dan WebSocket sampai terdapat bukti hubun
 
 ---
 
+## Audio Tuning — Volume Processing Disabled — August 20, 2026
+
+Pada commit firmware `9a5026d4` dilakukan perubahan khusus untuk **uji kestabilan audio**.
+
+### Yang diubah
+- Pemrosesan volume Gemini dinonaktifkan sementara.
+- `set_gemini_volume()` sekarang memaksa volume tetap **100%**.
+- `get_gemini_volume()` mengembalikan **100%**.
+- Jalur `queue_audio_pcm()` tidak lagi melakukan scaling PCM sample-per-sample.
+- PCM dari Gemini sekarang langsung dikirim ke ring buffer melalui `send_realtime_pcm()`.
+
+### Yang tidak diubah
+- I2S.
+- MAX98357A.
+- Ring buffer 32 KB.
+- Prebuffer 12 KB.
+- Playback wait 5 ms.
+- Playback task priority 7.
+- Baseline audio v6.1.5.
+
+### Tujuan
+Membuat jalur audio sesederhana mungkin untuk menguji apakah pemrosesan volume ikut menyebabkan speaker sendat.
+
+### Status
+**WAITING FOR RUNTIME TEST**
+
+Hasil belum dianggap terbukti sampai ada log baru setelah firmware ini dijalankan.
+
+---
+
 ## Audio Tuning — Current Phase
 
-Setelah koneksi Gemini berhasil, pekerjaan kembali difokuskan pada tuning audio/runtime berdasarkan log aktual.
+Setelah koneksi Gemini berhasil, pekerjaan difokuskan pada tuning audio/runtime berdasarkan log aktual.
 
 ### Constraint
 - Audio baseline v6.1.5 tetap dikunci.
 - Jangan mengubah konfigurasi yang sudah terbukti tanpa alasan teknis.
 - Pisahkan masalah input microphone, pemrosesan audio, output MAX98357A, WebSocket, dan I2C berdasarkan bukti log.
+- Perubahan terbaru hanya untuk eksperimen kestabilan, bukan penetapan baseline baru.
 
 ### Status
 **IN PROGRESS**
@@ -185,10 +216,11 @@ Per 20 Agustus 2026:
 
 1. Gemini WebSocket sudah berhasil terhubung.
 2. Audio v6.1.5 tetap menjadi baseline yang dilindungi.
-3. Audio/runtime tuning sedang berjalan.
-4. OLED/I2C software timeout masih perlu investigasi.
-5. WebSocket lifecycle tetap dipantau setelah rangkaian mitigasi v7.0.x.
-6. Setiap perubahan baru harus diverifikasi melalui build dan runtime log.
+3. Pemrosesan perintah volume sedang dinonaktifkan untuk uji kestabilan.
+4. Audio/runtime tuning sedang berjalan.
+5. OLED/I2C software timeout masih perlu investigasi.
+6. WebSocket lifecycle tetap dipantau setelah rangkaian mitigasi v7.0.x.
+7. Setiap perubahan baru harus diverifikasi melalui build dan runtime log.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
