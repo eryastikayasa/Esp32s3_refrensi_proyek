@@ -774,6 +774,102 @@ Jangan kembali mengubah baseline I2S v6.1.5. Fokus tuning berikutnya tetap pada 
 
 ---
 
+## v7.1.1 — Audio Control Module — August 20, 2026
+
+### Tujuan
+
+v7.0.36 sudah dijadikan baseline. v7.1.1 mulai membuat **jalur kontrol audio terpisah** supaya fitur volume/mute tidak langsung mengubah jalur I2S yang sudah stabil.
+
+### Perubahan firmware
+
+Dibuat modul baru:
+
+```text
+components/audio_control/
+```
+
+Modul ini menangani kontrol pada PCM16 sebelum data masuk ke jalur speaker:
+
+```text
+PCM16 Gemini
+    ↓
+audio_control
+    ↓
+PCM16 speaker
+```
+
+Fungsi kontrol yang dibuat:
+
+```text
+audio_control_set_volume(percent)
+audio_control_get_volume()
+audio_control_set_mute(muted)
+audio_control_is_muted()
+audio_control_process_pcm16(pcm, sample_count)
+```
+
+Perilaku awal:
+
+- Volume default = 100%.
+- Mute default = OFF.
+- Jika volume 100% dan tidak mute, PCM **tidak disentuh**.
+- Jika mute atau volume 0%, sample PCM dibuat 0.
+- Jika volume di antara 1–99%, PCM16 dikalikan sesuai persentase.
+- Hasil scaling dijaga tetap pada rentang PCM16 `-32768..32767`.
+
+### Catatan stabilitas
+
+Aturan penting v7.1.1:
+
+```text
+100% + unmuted
+        ↓
+PCM asli langsung lewat
+```
+
+Artinya mode default tidak menambahkan proses scaling ke audio yang sudah terbukti stabil pada v7.0.36.
+
+I2S v6.1.5, INMP441, MAX98357A, format PCM, dan jalur WebSocket tidak diubah untuk fitur kontrol ini.
+
+### Masalah build awal
+
+Build GitHub Actions pertama gagal pada `audio_control.cpp` karena pemanggilan:
+
+```cpp
+std::clamp(scaled, -32768, 32767)
+```
+
+memiliki konflik tipe antara `int32_t` dan `int` pada toolchain ESP32-S3.
+
+Perbaikan dilakukan menjadi clamp bertipe eksplisit:
+
+```cpp
+std::clamp<int32_t>(scaled, -32768, 32767)
+```
+
+Tidak ada perubahan pada jalur I2S untuk memperbaiki error ini. Ini murni perbaikan compile C++.
+
+### Hasil CI
+
+Setelah perbaikan `std::clamp`, GitHub Actions build **PASS / centang hijau**.
+
+### Yang tidak dilakukan pada v7.1.1
+
+- Belum flash ke ESP32-S3 pada saat pencatatan ini.
+- Belum menyatakan v7.1.1 sebagai baseline baru.
+- Tidak mengubah baseline v7.0.36.
+- Tidak mengubah konfigurasi I2S v6.1.5.
+- Tidak mengubah INMP441 atau MAX98357A.
+- Tidak mengubah WebSocket JSON protocol.
+
+### Status
+
+**v7.1.1 = DEVELOPMENT / BUILD PASS / MENUNGGU HARDWARE TEST.**
+
+Baseline tetap **v7.0.36** sampai v7.1.1 selesai diuji di hardware.
+
+---
+
 ## Project Rule — Jangan Kembali ke Awal
 
 Setiap tuning berikutnya wajib:
