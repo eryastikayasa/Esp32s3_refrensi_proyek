@@ -160,11 +160,11 @@ ESP-IDF menggunakan scheduler per-core pada ESP32-S3. Task yang tidak dipin dapa
 CPU1 IDLE WDT       = TIDAK MUNCUL
 CPU1 audio_playback = TIDAK MUNCUL
 WebSocket Gemini    = CONNECTED
-setupComplete       = OK
-Audio RX            = BERJALAN
-Audio playback      = BERJALAN
+setupComplete        = OK
+Audio RX             = BERJALAN
+Audio playback       = BERJALAN
 AUDIO PLAYBACK COMPLETE = OK
-pending             = 0
+pending              = 0
 ```
 
 ### Status
@@ -174,3 +174,49 @@ pending             = 0
 Baseline hardware tetap **v6.1.5**.
 
 Baseline proyek sebelum v7.1.2 tetap **v7.0.36** sampai hasil hardware v7.1.2 terbukti stabil.
+
+---
+
+## v7.1.2 — Build Failure Correction — August 21, 2026
+
+### Masalah build
+
+Build v7.1.2 gagal pada tahap linker karena implementasi dua fungsi audio tidak sengaja hilang dari `websocket_audio.cpp`:
+
+```text
+begin_audio_turn()
+queue_audio_pcm()
+```
+
+Fungsi tersebut masih digunakan oleh jalur WebSocket RX/JSON sehingga menghasilkan `undefined reference` saat linking.
+
+### Perbaikan
+
+Commit berikut memperbaiki `websocket_audio.cpp` dengan:
+
+- mengembalikan `begin_audio_turn()`;
+- mengembalikan `queue_audio_pcm()`;
+- mempertahankan `audio_playback` pinned ke CPU0;
+- mempertahankan logging `core=0`;
+- tidak mengubah konfigurasi I2S, pin, sample rate, PCM16, ring buffer, Gemini setup, atau MIC TX gate.
+
+### Commit Gemini Project
+
+```text
+c5071739e014f09995e2ba1e55ceaa44c1234b75
+```
+
+Message:
+
+```text
+fix(v7.1.2): restore audio queue functions
+```
+
+### Status
+
+**v7.1.2 correction = CODE FIXED / MENUNGGU BUILD ULANG.**
+
+Jangan flash sebelum GitHub Actions menghasilkan build hijau.
+
+Baseline hardware tetap **v6.1.5**.
+Baseline proyek terbukti terakhir tetap **v7.0.36** sampai v7.1.2 lolos build + hardware test.
