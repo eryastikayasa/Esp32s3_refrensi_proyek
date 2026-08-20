@@ -277,6 +277,45 @@ Masalah telah dipersempit ke **jalur WebSocket/TLS write saat realtime audio**, 
 
 ---
 
+## v7.0.30 — WebSocket Audio TX Write Hardening — August 20, 2026
+
+Firmware branch `fix/ws-audio-write-timeout-v7.0.30` dibuat untuk menargetkan error runtime terbaru:
+
+```text
+E transport_ws: Error transport_poll_write(0)
+E websocket_client: esp_transport_write() returned 0
+E WS_EVENT: WebSocket Error!
+```
+
+### Perubahan
+- Timeout `esp_websocket_client_send_text()` untuk realtime audio dinaikkan dari **150 ms menjadi 1000 ms**.
+- Jika satu write audio gagal/timeout, TX worker melakukan **1 retry** setelah jeda 30 ms.
+- Retry hanya dilakukan jika generation, koneksi, client handle, dan status WebSocket masih valid.
+- Jika retry berhasil, frame dilanjutkan tanpa memaksa lifecycle WebSocket berubah.
+- `network_timeout_ms` dinaikkan dari **10000 ms menjadi 15000 ms**.
+- WebSocket keep-alive PING tetap **OFF** selama investigasi.
+- Ukuran capture frame tetap 3200 byte.
+- Ukuran actual WebSocket audio chunk tetap 1600 byte.
+- I2S/audio baseline v6.1.5 tidak disentuh.
+
+### Alasan teknis
+`esp_websocket_client_send_text()` memang menerima timeout write, sehingga timeout yang terlalu agresif dapat membuat write realtime dianggap gagal sebelum transport selesai. Dokumentasi ESP WebSocket Client juga menggunakan timeout sebagai parameter resmi pada API send. citeturn0search0
+
+### Target pengujian berikutnya
+Setelah firmware v7.0.30 di-flash:
+
+1. Pastikan tidak muncul lagi `transport_poll_write(0)` segera setelah `setupComplete`.
+2. Cari log `TX audio retry BERHASIL` jika terjadi transient write stall.
+3. Pastikan `WS_EVENT: WebSocket TERHUBUNG ke Gemini!` tetap stabil.
+4. Uji bicara pendek ke mikrofon.
+5. Catat apakah audio Gemini diterima dan diputar tanpa disconnect.
+6. Jika masih disconnect, jangan ubah I2S/OLED dulu. Fokus berikutnya adalah **transport write lifecycle / socket close reason**.
+
+### Status
+**READY FOR HARDWARE TEST — NOT YET VERIFIED**
+
+---
+
 # Current Development Direction
 
 Per 20 Agustus 2026:
@@ -287,7 +326,8 @@ Per 20 Agustus 2026:
 4. OLED/I2C dinonaktifkan sementara dan timeout I2C sudah hilang dari runtime.
 5. WebSocket keep-alive PING dinonaktifkan sementara.
 6. Masalah terbaru adalah `transport_poll_write(0)` / `esp_transport_write() returned 0` ketika realtime audio berjalan.
-7. Fokus berikutnya adalah isolasi jalur TX audio tanpa mengubah baseline I2S.
+7. v7.0.30 menargetkan write timeout terlalu agresif dengan timeout 1000 ms + satu retry.
+8. Jangan mengubah baseline I2S/audio selama pengujian v7.0.30.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
