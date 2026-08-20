@@ -377,7 +377,71 @@ Audio RX tetap berjalan
 AUDIO PLAYBACK COMPLETE
 ```
 
-**Status: MENUNGGU HARDWARE LOG v7.0.33**
+**Status: superseded by v7.0.34.**
+
+---
+
+## v7.0.34 — Audio Playback Scheduler Yield — August 20, 2026
+
+### Masalah yang ditargetkan
+
+v7.0.33 sudah membatasi `i2s_channel_write()` menjadi timeout 50 ms dan hanya melakukan `vTaskDelay(1)` ketika write gagal.
+
+Namun ada celah: jika I2S terus berhasil menulis, `audio_write_speaker()` bisa menjalankan banyak chunk 512 sample berturut-turut tanpa memberi kesempatan scheduler. Ini masih berpotensi membuat `audio_playback` terlalu lama aktif di CPU1 dan kembali menekan `IDLE1`/Task WDT.
+
+### Perubahan v7.0.34
+
+Tidak mengubah format I2S atau hardware audio.
+
+Setelah setiap chunk I2S yang berhasil ditulis, sekarang dilakukan:
+
+```text
+I2S write sukses
+      ↓
+vTaskDelay(1)
+      ↓
+lanjut ke chunk berikutnya
+```
+
+Konfigurasi yang dipertahankan dari v7.0.33:
+
+```text
+I2S_WRITE_SAMPLES     = 512
+I2S_WRITE_TIMEOUT_MS  = 50
+```
+
+Jadi v7.0.34 adalah **perbaikan scheduling**, bukan perubahan timing/data format I2S.
+
+### Yang TIDAK diubah
+
+- I2S v6.1.5 tetap LOCKED.
+- INMP441.
+- MAX98357A.
+- Mic 16 kHz.
+- Speaker 24 kHz.
+- DMA configuration.
+- Audio ring 32768 byte.
+- Prebuffer 12288 byte.
+- Volume processing OFF.
+- OLED OFF.
+- PING OFF.
+- RX slot 8 / queue 8.
+- TX timeout 1000 ms.
+- TX retry 1x / 30 ms.
+
+### Target hardware test v7.0.34
+
+```text
+Tidak ada task_wdt: IDLE1
+Tidak ada CPU 1: audio_playback WDT
+WebSocket tetap connected
+Tidak ada transport_poll_write(0)
+RX tetap berjalan
+AUDIO PLAYBACK COMPLETE
+pending=0
+```
+
+**Status: MENUNGGU HARDWARE LOG v7.0.34**
 
 ---
 
