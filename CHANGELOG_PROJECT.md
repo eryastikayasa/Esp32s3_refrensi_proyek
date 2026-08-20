@@ -274,7 +274,7 @@ Firmware berhasil boot, Wi-Fi/DNS/TCP/WSS dan `setupComplete` berhasil. Namun ko
 WS_EVENT: WebSocket TERHUBUNG ke Gemini!
 WS_JSON: Gemini setupComplete: SESI SIAP
 E transport_ws: Error transport_poll_write(0)
-E websocket_client: esp_transport_write() returned 0
+E websocket_client: esp_websocket_client_write() returned 0
 W WS_EVENT: Connection generation invalidated
 W WS_EVENT: WebSocket TERPUTUS dari Gemini
 ```
@@ -412,36 +412,110 @@ I2S_WRITE_TIMEOUT_MS  = 50
 
 Jadi v7.0.34 adalah **perbaikan scheduling**, bukan perubahan timing/data format I2S.
 
-### Yang TIDAK diubah
+### Hasil hardware v7.0.34
+
+Pada pengujian ini perangkat **belum mencoba berbicara**.
+
+Yang berhasil:
+
+- Wi-Fi/DNS/TCP 443 OK.
+- WebSocket/TLS OK.
+- Gemini `setupComplete` OK.
+- Session resumption tetap OK.
+- RX message berjalan sampai 21 message.
+- Tidak muncul `task_wdt` pada `audio_playback`.
+
+Yang masih gagal:
+
+```text
+transport_poll_write(0)
+esp_websocket_client: esp_transport_write() returned 0
+WS_EVENT: WebSocket Error!
+WebSocket TERPUTUS dari Gemini
+```
+
+Setelah disconnect baru muncul timeout TX audio. Jadi timeout audio tersebut dianggap **efek setelah koneksi mati**, bukan penyebab pertama.
+
+**Status: superseded by v7.0.35.**
+
+---
+
+## v7.0.35 — Idle Microphone TX Gate — August 20, 2026
+
+### Alasan perubahan
+
+Log v7.0.34 menunjukkan koneksi mati pada `transport_poll_write(0)` walaupun user belum berbicara.
+
+Source code kemudian dicek. `audio_task` ternyata tetap membaca INMP441 dan mengirim frame PCM 3200 byte ke TX queue setelah Gemini `setupComplete`, sehingga perangkat dapat terus melakukan audio TX saat kondisi idle/senyap.
+
+Ini menjadi jalur yang perlu diisolasi sebelum mengubah WebSocket transport lebih jauh.
+
+### Perubahan
+
+Di `main/main.cpp` ditambahkan gate aktivitas PCM16:
+
+```text
+Frame mic 3200 byte
+       ↓
+cek aktivitas sample
+       ↓
+senyap → tidak dikirim
+aktif → kirim seperti biasa
+```
+
+Parameter diagnosis:
+
+```text
+SILENCE_THRESHOLD = 700
+MIN_ACTIVE_SAMPLES = 8
+```
+
+Frame senyap hanya dibuang dari TX. I2S/audio hardware tidak disentuh.
+
+Ditambahkan log periodik:
+
+```text
+V7.0.35 MIC TX gate: silent frames dropped=...
+```
+
+### Yang tidak diubah
 
 - I2S v6.1.5 tetap LOCKED.
-- INMP441.
-- MAX98357A.
+- INMP441 tetap.
+- MAX98357A tetap.
 - Mic 16 kHz.
 - Speaker 24 kHz.
-- DMA configuration.
+- I2S/DMA tidak diubah.
 - Audio ring 32768 byte.
 - Prebuffer 12288 byte.
 - Volume processing OFF.
 - OLED OFF.
 - PING OFF.
-- RX slot 8 / queue 8.
 - TX timeout 1000 ms.
-- TX retry 1x / 30 ms.
+- Retry 1x / 30 ms.
+- RX slot 8 / queue 8.
 
-### Target hardware test v7.0.34
+### Urutan hardware test
+
+**Test 1 — idle:** jangan bicara setelah `setupComplete`.
+
+Target:
 
 ```text
-Tidak ada task_wdt: IDLE1
-Tidak ada CPU 1: audio_playback WDT
-WebSocket tetap connected
-Tidak ada transport_poll_write(0)
-RX tetap berjalan
-AUDIO PLAYBACK COMPLETE
-pending=0
+MIC TX gate: silent frames dropped=...
 ```
 
-**Status: MENUNGGU HARDWARE LOG v7.0.34**
+tetapi tidak ada disconnect/`transport_poll_write(0)`.
+
+**Test 2 — bicara:** setelah idle test stabil, bicara normal dan lihat apakah frame aktif terkirim serta Gemini merespons.
+
+### Keputusan berikutnya
+
+- Idle stabil → fokus berikutnya pada TX audio aktif.
+- Idle tetap disconnect → fokus pada write non-audio/internal WebSocket lifecycle.
+- Jangan mengubah baseline I2S berdasarkan hasil ini saja.
+
+**Status: MENUNGGU HARDWARE LOG v7.0.35**
 
 ---
 
