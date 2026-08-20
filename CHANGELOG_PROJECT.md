@@ -515,7 +515,115 @@ tetapi tidak ada disconnect/`transport_poll_write(0)`.
 - Idle tetap disconnect → fokus pada write non-audio/internal WebSocket lifecycle.
 - Jangan mengubah baseline I2S berdasarkan hasil ini saja.
 
-**Status: MENUNGGU HARDWARE LOG v7.0.35**
+**Status: superseded by v7.0.35 hardware result below.**
+
+---
+
+## v7.0.35 — Hardware Result: 30-Second Idle Then “Halo Gemini” — August 20, 2026
+
+### Kondisi test
+
+Perangkat didiamkan sekitar 30 detik setelah `Gemini setupComplete`, kemudian user berbicara: **“halo gemini”**.
+
+### Hasil idle 30 detik
+
+MIC TX gate bekerja. Selama idle muncul berulang kali:
+
+```text
+V7.0.35 MIC TX gate: silent frames dropped=...
+```
+
+Tidak terjadi disconnect WebSocket selama periode idle tersebut.
+
+Ini adalah hasil penting: **masalah disconnect v7.0.34 saat perangkat diam tidak terulang pada v7.0.35.**
+
+### Hasil saat Gemini merespons
+
+Gemini mengirim audio dan jalur playback berjalan:
+
+```text
+WS_JSON: AUDIO GEMINI: 4800 byte -> AUDIO BUFFER
+WS_JSON: AUDIO GEMINI: 1920 byte -> AUDIO BUFFER
+WS_AUDIO: AUDIO FLOW: pending=10426/32768 received=12480 queued=12474 played=2048 dropped=0
+WS_JSON: Gemini: GENERATION COMPLETE
+```
+
+Playback kemudian selesai:
+
+```text
+WS_AUDIO: AUDIO PLAYBACK COMPLETE: received=93105 queued=89984 played=89984 pending=0 dropped=3036 balance=85
+WS_JSON: Gemini: TURN COMPLETE - menunggu audio drain
+WS_JSON: AUDIO SUMMARY: chunks=90 received=93105 played=89984 pending=0 write_calls=44
+```
+
+### Masalah yang ditemukan
+
+Masih ada tekanan pada RX/audio queue:
+
+```text
+Audio PCM drop terukur: 514 byte
+Audio PCM drop terukur: 1018 byte
+Audio PCM drop terukur: 494 byte
+Audio PCM drop terukur: 1010 byte
+
+dropped_frag=15
+seq_err=12
+buffer_drop=3
+```
+
+Ring buffer sempat hampir penuh:
+
+```text
+pending=31742/32768
+```
+
+Kemudian terjadi:
+
+```text
+AUDIO PLAYBACK UNDERRUN: PCM buffer kosong di tengah turn
+```
+
+Total audio yang terukur:
+
+```text
+received = 93105 byte
+queued   = 89984 byte
+played   = 89984 byte
+pending  = 0 byte
+write_calls = 44
+dropped  = 3036 byte
+```
+
+Jadi audio akhirnya **drain sampai habis**, tetapi terdapat drop PCM dan satu underrun di tengah turn.
+
+### Kesimpulan v7.0.35
+
+**Berhasil:**
+
+- Idle 30 detik stabil.
+- Silent microphone tidak lagi memenuhi TX queue.
+- WebSocket tetap hidup saat idle.
+- User dapat memicu respons dengan bicara.
+- Gemini menghasilkan audio.
+- Speaker memutar audio sampai selesai.
+- Tidak terlihat `task_wdt`/reset pada hasil log ini.
+- Baseline I2S v6.1.5 tetap tidak disentuh.
+
+**Belum stabil:**
+
+- RX fragment pressure masih ada.
+- `seq_err` masih ada.
+- Audio queue masih drop PCM.
+- Ring buffer hampir penuh.
+- Satu playback underrun masih terjadi.
+
+### Keputusan untuk perbaikan berikutnya
+
+Fokus berikutnya dipindahkan dari **idle WebSocket disconnect** ke **RX burst → audio queue → playback backpressure**.
+
+Jangan mengubah I2S v6.1.5, INMP441, MAX98357A, atau format 16 kHz mic / 24 kHz speaker hanya karena hasil ini.
+
+**Status: HARDWARE TEST BERHASIL SEBAGIAN / IDLE GATE TERBUKTI / AUDIO BUFFERING MASIH PERLU DIPERBAIKI**
 
 ---
 
