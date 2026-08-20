@@ -196,38 +196,68 @@ Untuk pengujian berikutnya, OLED dan akses I2C OLED **dinonaktifkan sementara**.
 - `oled_init()` tetap dipertahankan agar alur program tidak perlu dirombak.
 - `display_status()` tetap mencatat status ke log, tetapi tidak mengirim data ke OLED.
 
-### Yang sengaja tidak diubah
+### Hasil runtime
+Pada firmware `e860367`, boot menunjukkan:
+
+```text
+DISPLAY: OLED DISABLED - audio stability test
+```
+
+dan seluruh `I2C software timeout` yang sebelumnya muncul berulang kali **hilang**.
+
+Namun setelah `Gemini setupComplete`, sistem kemudian diam. Runtime berikutnya menunjukkan:
+
+```text
+E (41374) websocket_client: Could not lock ws-client within 2000 timeout for PING
+```
+
+### Kesimpulan
+OLED/I2C **bukan lagi kandidat utama** untuk masalah diam tersebut. Pengujian ini berhasil mengisolasi I2C dari sistem dan menunjukkan masalah berikutnya berada di jalur WebSocket/runtime.
+
+### Status
+**OLED-OFF TEST VERIFIED — I2C TIMEOUT GONE**
+
+---
+
+## v7.0.27 — WebSocket Audio TX Lock Tuning — August 20, 2026
+
+Runtime OLED-OFF menunjukkan masalah baru:
+
+```text
+Could not lock ws-client within 2000 timeout for PING
+```
+
+Setelah dibedah, audio microphone dikirim setiap **3200 byte** (sekitar 100 ms audio) melalui TX worker. Sebelumnya setiap `esp_websocket_client_send_text()` audio dapat menunggu sampai **5000 ms**.
+
+### Perubahan
+Pada `components/websocket/websocket_mgr.cpp`:
+
+- Timeout pengiriman audio diturunkan dari **5000 ms menjadi 250 ms**.
+- Jika satu frame audio gagal/timeout, frame tersebut **dibuang saja**.
+- Kegagalan satu frame audio **tidak langsung mematikan koneksi WebSocket**.
+- Ditambahkan log khusus saat TX audio timeout/fail.
+- TX queue dan kebijakan drop frame lama tetap dipertahankan.
+
+### Kenapa?
+Tujuannya mencegah realtime audio memegang/menunggu lock WebSocket selama beberapa detik sehingga traffic kontrol seperti PING ikut tertahan.
+
+### Yang tidak diubah
 - I2S microphone.
 - I2S speaker.
 - MAX98357A.
-- Ring buffer audio.
-- Prebuffer audio.
-- WebSocket/Gemini.
-- RX worker.
-- JSON/Base64 audio processing.
-- Volume processing yang sudah dinonaktifkan sebelumnya.
-- Audio baseline v6.1.5.
+- Ring buffer playback.
+- Prebuffer.
+- Volume processing tetap OFF.
+- OLED tetap OFF untuk test ini.
+- Connection generation tetap dipertahankan.
 
-### Alasan
-Runtime sebelumnya menunjukkan `I2C software timeout` berulang kali. Karena timeout terjadi bersamaan dengan aktivitas sistem dan kita sedang mencari penyebab speaker sendat, OLED/I2C dipisahkan terlebih dahulu dari jalur audio.
-
-### Tujuan test
-Menjawab satu pertanyaan:
-
-> Apakah speaker masih sendat ketika OLED dan akses I2C benar-benar tidak berjalan?
-
-### Cara membaca hasil
-
-**Jika speaker menjadi lancar:**
-- OLED/I2C sangat mungkin ikut mengganggu timing audio.
-- Setelah itu driver I2C/OLED akan dibedah untuk mencari perbaikan yang aman.
-
-**Jika speaker tetap sendat:**
-- OLED/I2C dapat dicoret sebagai penyebab utama.
-- Investigasi dilanjutkan ke jalur RX → JSON/Base64 → PCM → ring buffer → I2S.
+### Commit firmware
+```text
+3f6cd6d70085b2e1353742485e2945775656e272
+```
 
 ### Status
-**WAITING FOR OLED-OFF RUNTIME TEST**
+**WAITING FOR RUNTIME TEST**
 
 ---
 
@@ -242,7 +272,7 @@ Setelah koneksi Gemini berhasil, pekerjaan difokuskan pada tuning audio/runtime 
 - Perubahan eksperimen harus diverifikasi melalui build dan runtime log sebelum dianggap sebagai baseline baru.
 
 ### Status
-**IN PROGRESS**
+**IN PROGRESS — WEBSOCKET TX LOCK TEST**
 
 ---
 
@@ -253,10 +283,11 @@ Per 20 Agustus 2026:
 1. Gemini WebSocket sudah berhasil terhubung.
 2. Audio v6.1.5 tetap menjadi baseline yang dilindungi.
 3. Pemrosesan perintah volume masih dinonaktifkan untuk uji kestabilan.
-4. OLED/I2C sekarang dinonaktifkan sementara untuk isolasi masalah audio.
-5. Hasil test OLED-OFF menjadi penentu langkah diagnosis berikutnya.
-6. Jika masih sendat, fokus berpindah ke RX/JSON/Base64/audio scheduling.
-7. WebSocket lifecycle tetap dipantau setelah rangkaian mitigasi v7.0.x.
+4. OLED/I2C dinonaktifkan sementara dan timeout I2C sudah hilang dari runtime.
+5. Masalah terbaru mengarah ke WebSocket client lock saat PING.
+6. TX audio sekarang dibatasi timeout 250 ms agar tidak memonopoli lock terlalu lama.
+7. Test berikutnya harus melihat apakah PING lock error dan kondisi diam hilang.
+8. Jika masih bermasalah, lanjutkan bedah lifecycle/control WebSocket tanpa mengubah audio baseline.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
