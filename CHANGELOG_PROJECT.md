@@ -3,6 +3,8 @@
 Dokumen ini mencatat milestone, baseline, perubahan arsitektur penting, hasil hardware test, dan keputusan tuning agar konteks proyek tidak hilang saat pekerjaan dilanjutkan oleh AI.
 
 > Jangan menghapus sejarah yang masih relevan. Tambahkan milestone baru.
+> Gunakan bahasa sehari-hari/sederhana saat menjelaskan perubahan.
+> Setiap perubahan firmware wajib dicatat di dokumen ini agar AI tidak kembali ke awal.
 
 ---
 
@@ -89,7 +91,7 @@ Kemudian DNS dan TCP 443 terbukti OK dan WSS Gemini berhasil.
 - PCM Gemini dikirim langsung ke ring buffer.
 - I2S, INMP441, MAX98357A, dan baseline v6.1.5 tidak diubah.
 
-Current audio buffering sebelum v7.0.31:
+Current audio buffering:
 
 ```text
 ring=32768
@@ -105,7 +107,7 @@ target=48000 B/s
 
 OLED/I2C dimatikan untuk isolasi audio.
 
-Hasil: timeout I2C sebelumnya tidak muncul. Wi-Fi, DNS, TCP, WSS Gemini, setupComplete, dan RX audio tetap berhasil.
+Hasil: timeout I2C sebelumnya tidak muncul. Wi-Fi, DNS, TCP, WSS Gemini, setupComplete, dan RX audio pernah berhasil pada pengujian sebelumnya.
 
 **Status:** OLED tetap OFF selama fase audio/RX isolation.
 
@@ -148,7 +150,7 @@ Masalah dipersempit ke realtime WebSocket/TLS TX, bukan DNS/TCP/setup/RX dasar.
 
 ## v7.0.30 — WebSocket Audio TX Write Retry Tuning — August 20, 2026
 
-### Perubahan
+### Perubahan yang ditargetkan
 
 - Audio TX timeout: 150 ms -> 1000 ms.
 - Retry audio write: 1 kali.
@@ -157,7 +159,7 @@ Masalah dipersempit ke realtime WebSocket/TLS TX, bukan DNS/TCP/setup/RX dasar.
 - Network timeout: 10 s -> 15 s.
 - WebSocket PING tetap OFF.
 
-### Hardware result
+### Hardware result yang menjadi referensi
 
 Full Gemini turn berhasil:
 
@@ -170,7 +172,7 @@ WS_AUDIO: AUDIO PLAYBACK COMPLETE: received=375834 queued=373488 played=373488 p
 WS_JSON: AUDIO SUMMARY: chunks=370 received=375834 played=373488 pending=0 write_calls=183
 ```
 
-Tidak terjadi `transport_poll_write(0)` atau disconnect sebelum turn selesai.
+Tidak terjadi `transport_poll_write(0)` atau disconnect sebelum turn selesai pada hasil referensi tersebut.
 
 ### Bottleneck yang ditemukan
 
@@ -197,7 +199,7 @@ pending=31510/32768
 
 Satu playback underrun masih muncul, tetapi audio akhirnya drain ke zero.
 
-**Kesimpulan:** TX WRITE PATH VERIFIED IMPROVED. Fokus pindah ke RX fragment/slot pressure dan audio queue backpressure.
+**Kesimpulan:** TX WRITE PATH terbukti membaik pada hasil referensi. Fokus kemudian pindah ke RX fragment/slot pressure dan audio queue backpressure.
 
 ---
 
@@ -212,29 +214,11 @@ queue_hwm=4
 buffer_drop=4
 ```
 
-dan log berulang:
+RX queue dan persistent slot pool kemudian dinaikkan:
 
 ```text
-RX slot persistent: slot=...
-RX BUFFER DROP: no free slot
-```
-
-RX queue dan persistent slot pool sebelumnya sama-sama berjumlah **6**:
-
-```text
-WS_RX_SLOT_COUNT 6
-WS_RX_QUEUE_LENGTH WS_RX_SLOT_COUNT
-```
-
-Dengan burst Gemini, empat `buffer_drop` menunjukkan pool dapat habis sebelum worker RX selesai membebaskan slot.
-
-### Perubahan firmware
-
-Pada repository firmware `eryastikayasa/esp32s3_voice_geminiproject`:
-
-```text
-WS_RX_SLOT_COUNT: 6 -> 8
-WS_RX_QUEUE_LENGTH: tetap mengikuti WS_RX_SLOT_COUNT -> 8
+WS_RX_SLOT_COUNT 6 -> 8
+WS_RX_QUEUE_LENGTH tetap mengikuti WS_RX_SLOT_COUNT -> 8
 ```
 
 Tidak ada perubahan pada:
@@ -246,65 +230,119 @@ Tidak ada perubahan pada:
 - Speaker 24 kHz.
 - Audio ring 32 KB.
 - Prebuffer 12 KB.
-- WebSocket TX timeout/retry v7.0.30.
-- PING tetap OFF.
+- Volume processing tetap OFF.
 - OLED tetap OFF.
+- PING tetap OFF.
 
-### Tujuan
+### Hasil hardware v7.0.31
 
-Memberi headroom dua slot tambahan untuk burst RX tanpa mengubah jalur audio/I2S. Tuning ini secara khusus menargetkan `buffer_drop` dan `queue_hwm`, bukan mencoba menyembunyikan `seq_err`.
-
-### Status
-
-**FIRMWARE TUNED — MENUNGGU HARDWARE LOG v7.0.31**
-
-### Kriteria keberhasilan
-
-Target utama:
+Firmware berhasil boot, Wi-Fi/DNS/TCP/WSS dan `setupComplete` berhasil. Namun koneksi kembali putus **sebelum burst audio RX dimulai**:
 
 ```text
-buffer_drop -> 0
-queue_hwm < 8
-queue_drop -> 0
+WS_EVENT: WebSocket TERHUBUNG ke Gemini!
+WS_JSON: Gemini setupComplete: SESI SIAP
+WS_JSON: Session resumption handle tersimpan
+E transport_ws: Error transport_poll_write(0)
+E websocket_client: esp_transport_write() returned 0
+W WS_EVENT: Connection generation invalidated
+W WS_EVENT: WebSocket TERPUTUS dari Gemini
 ```
 
-Kemudian lihat apakah `dropped_frag` dan `seq_err` ikut turun. Jika `seq_err` tetap tinggi walaupun `buffer_drop=0`, investigasi berikutnya harus fokus pada validitas `payload_offset`/fragment ordering, bukan menambah slot lagi.
+Karena putus terjadi sekitar 16,7 detik dan sebelum log `AUDIO GEMINI`, perubahan slot RX v7.0.31 **belum bisa dinilai**. Ini penting: jangan menganggap v7.0.31 gagal karena slot RX; masalah TX muncul lebih dulu.
+
+### Temuan penting
+
+Source `main` setelah v7.0.31 masih memakai:
+
+```text
+AUDIO_SEND_TIMEOUT = 150 ms
+network_timeout_ms = 10000
+retry = tidak ada
+```
+
+Padahal hasil hardware v7.0.30 yang dijadikan referensi menggunakan tuning TX yang lebih longgar. Jadi v7.0.32 harus lebih dulu menyamakan source dengan konfigurasi TX yang sudah terbukti pada hasil referensi.
+
+**Status:** RX slot tuning dipertahankan, tetapi validasi ditunda sampai TX stabil kembali.
 
 ---
 
-# Current Development Direction
+## v7.0.32 — Restore Proven WebSocket TX Timing + RX Slot v7.0.31 — August 20, 2026
 
-Per 20 Agustus 2026:
+### Perubahan firmware
 
-1. Gemini WebSocket dapat connect dan full turn sudah terbukti selesai.
-2. WebSocket/TLS TX v7.0.30 terbukti jauh lebih stabil pada hardware test.
-3. Audio/I2S v6.1.5 tetap **LOCKED**.
-4. Volume processing tetap OFF.
-5. OLED/I2C tetap OFF selama isolation.
-6. PING tetap OFF.
-7. v7.0.31 sekarang menguji peningkatan RX persistent slot pool dari 6 ke 8.
-8. Jangan menaikkan ring buffer secara buta; v7.0.30 menunjukkan largest free block sekitar 31 KB, sehingga alokasi ring internal yang lebih besar berisiko gagal.
-9. Fokus berikutnya ditentukan dari log v7.0.31:
-   - pertama `buffer_drop` / `queue_hwm`;
-   - kemudian `dropped_frag` / `seq_err`;
-   - kemudian PCM drop dan underrun.
-10. Jangan menyentuh I2S v6.1.5.
+Pada `components/websocket/websocket_mgr.cpp`:
+
+```text
+AUDIO_SEND_TIMEOUT      = 1000 ms
+AUDIO_SEND_RETRIES      = 1
+AUDIO_SEND_RETRY_DELAY  = 30 ms
+network_timeout_ms      = 15000
+PING                    = OFF
+PCM_SEND_CHUNK          = 1600 byte
+```
+
+RX slot v7.0.31 tetap dipertahankan:
+
+```text
+WS_RX_SLOT_COUNT = 8
+WS_RX_QUEUE_LENGTH = 8
+```
+
+### Kenapa ini dilakukan
+
+Log v7.0.31 menunjukkan error yang sama seperti masalah TX sebelumnya:
+
+```text
+transport_poll_write(0)
+esp_transport_write() returned 0
+```
+
+dan terjadi sebelum audio RX masuk. Jadi jangan menambah tuning RX lagi dulu. Kita kembalikan timing TX yang sudah pernah menghasilkan **full Gemini turn berhasil**.
+
+### Yang sengaja TIDAK diubah
+
+- Audio/I2S v6.1.5.
+- INMP441.
+- MAX98357A.
+- Mic 16 kHz.
+- Speaker 24 kHz.
+- Audio ring 32 KB.
+- Prebuffer 12 KB.
+- Volume processing.
+- OLED.
+- Session resumption.
+- RX slot expansion v7.0.31.
+
+### Target test v7.0.32
+
+Urutan keberhasilan yang dicari:
+
+```text
+Wi-Fi READY
+ -> DNS OK
+ -> TCP 443 OK
+ -> WebSocket CONNECTED
+ -> setupComplete
+ -> tidak ada transport_poll_write(0)
+ -> AUDIO GEMINI masuk
+ -> GENERATION COMPLETE
+ -> TURN COMPLETE
+ -> AUDIO PLAYBACK COMPLETE
+```
+
+Jika sudah sampai audio RX tetapi muncul `buffer_drop`, `seq_err`, atau `queue_hwm`, baru kita lanjut tuning RX. Jangan mengubah baseline audio v6.1.5.
+
+**Status: FIRMWARE v7.0.32 SUDAH DITERAPKAN DI MAIN — MENUNGGU HARDWARE LOG.**
 
 ---
 
-# Documentation Rule
+## Project Rule — Jangan Kembali ke Awal
 
-Setiap tuning harus dicatat dengan:
+Setiap tuning berikutnya wajib:
 
-1. nomor versi;
-2. file yang diubah;
-3. parameter sebelum/sesudah;
-4. alasan berdasarkan log;
-5. hal yang sengaja tidak diubah;
-6. hasil build/hardware test;
-7. metrik log sebelum/sesudah;
-8. keputusan tuning berikutnya.
-
-`CHANGELOG_PROJECT.md` = sejarah keputusan teknis.
-`CURRENT_STATE.md` = kondisi aktif saat ini.
-`PROJECT_CONTEXT.md` = pengetahuan proyek yang stabil.
+1. Baca `CHANGELOG_PROJECT.md` terlebih dahulu.
+2. Pertahankan baseline v6.1.5.
+3. Jangan mengulang eksperimen yang sudah terbukti atau sudah ditolak.
+4. Catat versi baru, alasan perubahan, hasil log, dan keputusan berikutnya.
+5. Gunakan bahasa sehari-hari/sederhana agar konteks mudah dipahami.
+6. Setelah setiap perubahan firmware, update changelog ini.
