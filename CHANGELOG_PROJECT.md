@@ -149,22 +149,6 @@ Koneksi Gemini Live melalui WebSocket telah mencapai kondisi berhasil pada pengu
 
 ---
 
-## OLED / I2C Timeout — Active Issue
-
-Pada runtime terbaru masih muncul:
-
-```text
-E i2c.master: I2C software timeout
-```
-
-### Keputusan debugging
-Masalah I2C/OLED dipisahkan dari audio dan WebSocket sampai terdapat bukti hubungan langsung.
-
-### Status
-**ACTIVE INVESTIGATION**
-
----
-
 ## Audio Tuning — Volume Processing Disabled — August 20, 2026
 
 Pada commit firmware `9a5026d4` dilakukan perubahan khusus untuk **uji kestabilan audio**.
@@ -185,13 +169,65 @@ Pada commit firmware `9a5026d4` dilakukan perubahan khusus untuk **uji kestabila
 - Playback task priority 7.
 - Baseline audio v6.1.5.
 
-### Tujuan
-Membuat jalur audio sesederhana mungkin untuk menguji apakah pemrosesan volume ikut menyebabkan speaker sendat.
+### Hasil runtime
+Setelah volume processing dimatikan, log menunjukkan:
+
+```text
+buffer_drop=0
+queue_drop=0
+seq_err=0
+dropped=0
+pending=0
+```
+
+Selisih `balance` turun dari `-3768` menjadi `-1794` pada pengujian yang dibandingkan. Ini menunjukkan volume processing kemungkinan ikut berpengaruh, tetapi belum terbukti sebagai satu-satunya penyebab speaker sendat.
 
 ### Status
-**WAITING FOR RUNTIME TEST**
+**VOLUME PROCESSING REMAINS DISABLED**
 
-Hasil belum dianggap terbukti sampai ada log baru setelah firmware ini dijalankan.
+---
+
+## OLED OFF — Audio Isolation Test — August 20, 2026
+
+Untuk pengujian berikutnya, OLED dan akses I2C OLED **dinonaktifkan sementara**.
+
+### Yang diubah
+- `components/display/display.cpp` dibuat tidak melakukan transaksi I2C OLED.
+- `oled_init()` tetap dipertahankan agar alur program tidak perlu dirombak.
+- `display_status()` tetap mencatat status ke log, tetapi tidak mengirim data ke OLED.
+
+### Yang sengaja tidak diubah
+- I2S microphone.
+- I2S speaker.
+- MAX98357A.
+- Ring buffer audio.
+- Prebuffer audio.
+- WebSocket/Gemini.
+- RX worker.
+- JSON/Base64 audio processing.
+- Volume processing yang sudah dinonaktifkan sebelumnya.
+- Audio baseline v6.1.5.
+
+### Alasan
+Runtime sebelumnya menunjukkan `I2C software timeout` berulang kali. Karena timeout terjadi bersamaan dengan aktivitas sistem dan kita sedang mencari penyebab speaker sendat, OLED/I2C dipisahkan terlebih dahulu dari jalur audio.
+
+### Tujuan test
+Menjawab satu pertanyaan:
+
+> Apakah speaker masih sendat ketika OLED dan akses I2C benar-benar tidak berjalan?
+
+### Cara membaca hasil
+
+**Jika speaker menjadi lancar:**
+- OLED/I2C sangat mungkin ikut mengganggu timing audio.
+- Setelah itu driver I2C/OLED akan dibedah untuk mencari perbaikan yang aman.
+
+**Jika speaker tetap sendat:**
+- OLED/I2C dapat dicoret sebagai penyebab utama.
+- Investigasi dilanjutkan ke jalur RX → JSON/Base64 → PCM → ring buffer → I2S.
+
+### Status
+**WAITING FOR OLED-OFF RUNTIME TEST**
 
 ---
 
@@ -203,7 +239,7 @@ Setelah koneksi Gemini berhasil, pekerjaan difokuskan pada tuning audio/runtime 
 - Audio baseline v6.1.5 tetap dikunci.
 - Jangan mengubah konfigurasi yang sudah terbukti tanpa alasan teknis.
 - Pisahkan masalah input microphone, pemrosesan audio, output MAX98357A, WebSocket, dan I2C berdasarkan bukti log.
-- Perubahan terbaru hanya untuk eksperimen kestabilan, bukan penetapan baseline baru.
+- Perubahan eksperimen harus diverifikasi melalui build dan runtime log sebelum dianggap sebagai baseline baru.
 
 ### Status
 **IN PROGRESS**
@@ -216,11 +252,11 @@ Per 20 Agustus 2026:
 
 1. Gemini WebSocket sudah berhasil terhubung.
 2. Audio v6.1.5 tetap menjadi baseline yang dilindungi.
-3. Pemrosesan perintah volume sedang dinonaktifkan untuk uji kestabilan.
-4. Audio/runtime tuning sedang berjalan.
-5. OLED/I2C software timeout masih perlu investigasi.
-6. WebSocket lifecycle tetap dipantau setelah rangkaian mitigasi v7.0.x.
-7. Setiap perubahan baru harus diverifikasi melalui build dan runtime log.
+3. Pemrosesan perintah volume masih dinonaktifkan untuk uji kestabilan.
+4. OLED/I2C sekarang dinonaktifkan sementara untuk isolasi masalah audio.
+5. Hasil test OLED-OFF menjadi penentu langkah diagnosis berikutnya.
+6. Jika masih sendat, fokus berpindah ke RX/JSON/Base64/audio scheduling.
+7. WebSocket lifecycle tetap dipantau setelah rangkaian mitigasi v7.0.x.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
