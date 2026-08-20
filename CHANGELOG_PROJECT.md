@@ -150,18 +150,53 @@ Masalah dipersempit ke realtime WebSocket/TLS TX, bukan DNS/TCP/setup/RX dasar.
 
 ## v7.0.30 — WebSocket Audio TX Write Retry Tuning — August 20, 2026
 
-### Perubahan yang ditargetkan
+### Masalah sebelum v7.0.30
 
-- Audio TX timeout: 150 ms -> 1000 ms.
-- Retry audio write: 1 kali.
-- Retry delay: 30 ms.
-- Retry hanya jika connection generation masih valid.
-- Network timeout: 10 s -> 15 s.
-- WebSocket PING tetap OFF.
+Hasil v7.0.29 menunjukkan WebSocket sudah berhasil tersambung ke Gemini dan setup berhasil, tetapi saat jalur audio TX aktif koneksi bisa gagal pada:
 
-### Hardware result yang menjadi referensi
+```text
+transport_poll_write(0)
+esp_transport_write() returned 0
+WS_EVENT: WebSocket Error!
+```
 
-Full Gemini turn berhasil:
+Sebelumnya timeout audio TX masih terlalu pendek untuk kondisi realtime WebSocket/TLS. Karena itu fokus v7.0.30 adalah **melonggarkan jalur write audio**, bukan mengubah I2S atau hardware audio.
+
+### Perubahan yang dilakukan
+
+Pada WebSocket TX/audio write:
+
+```text
+Audio TX timeout : 150 ms -> 1000 ms
+Retry            : 1 kali
+Retry delay      : 30 ms
+```
+
+Retry hanya boleh berjalan jika **connection generation masih valid**, supaya worker tidak meneruskan pengiriman ke koneksi lama yang sudah putus.
+
+Network timeout juga dinaikkan:
+
+```text
+10 s -> 15 s
+```
+
+WebSocket keep-alive PING tetap **OFF**.
+
+### Yang tidak diubah
+
+- I2S v6.1.5 tetap LOCKED.
+- INMP441 tetap.
+- MAX98357A tetap.
+- Mic tetap 16 kHz.
+- Speaker tetap 24 kHz.
+- Audio ring tetap 32768 byte.
+- Prebuffer tetap 12288 byte.
+- Volume processing tetap OFF.
+- OLED tetap OFF.
+
+### Hasil hardware v7.0.30
+
+Ini menjadi hasil penting yang dipakai sebagai referensi tuning berikutnya. Full Gemini turn berhasil sampai audio selesai:
 
 ```text
 WS_EVENT: WebSocket TERHUBUNG ke Gemini!
@@ -172,9 +207,11 @@ WS_AUDIO: AUDIO PLAYBACK COMPLETE: received=375834 queued=373488 played=373488 p
 WS_JSON: AUDIO SUMMARY: chunks=370 received=375834 played=373488 pending=0 write_calls=183
 ```
 
-Tidak terjadi `transport_poll_write(0)` atau disconnect sebelum turn selesai pada hasil referensi tersebut.
+Pada hasil ini tidak terjadi `transport_poll_write(0)` atau disconnect sebelum turn selesai.
 
-### Bottleneck yang ditemukan
+### Masalah yang masih tersisa
+
+Walaupun TX write sudah jauh lebih stabil, RX masih menunjukkan tekanan fragment/queue:
 
 ```text
 dropped_frag=12 seq_err=10 buffer_drop=2
@@ -182,7 +219,7 @@ dropped_frag=34 seq_err=31 buffer_drop=3
 dropped_frag=49 seq_err=45 buffer_drop=4
 ```
 
-Audio queue drop:
+Audio queue juga sempat drop:
 
 ```text
 38 byte
@@ -191,15 +228,21 @@ Audio queue drop:
 180 byte
 ```
 
-Ring buffer mencapai:
+Ring buffer sempat hampir penuh:
 
 ```text
 pending=31510/32768
 ```
 
-Satu playback underrun masih muncul, tetapi audio akhirnya drain ke zero.
+Satu playback underrun masih muncul, tetapi audio akhirnya berhasil drain sampai zero.
 
-**Kesimpulan:** TX WRITE PATH terbukti membaik pada hasil referensi. Fokus kemudian pindah ke RX fragment/slot pressure dan audio queue backpressure.
+### Kesimpulan v7.0.30
+
+**TX WRITE PATH terbukti membaik.** Ini adalah baseline hasil hardware yang penting dan jangan dibuang.
+
+Setelah v7.0.30, fokus investigasi dipindahkan ke **RX fragment/slot pressure dan audio queue backpressure**, bukan kembali mengubah I2S.
+
+**Status: HASIL HARDWARE BERHASIL / BASELINE TX TERBUKTI**
 
 ---
 
@@ -221,46 +264,22 @@ WS_RX_SLOT_COUNT 6 -> 8
 WS_RX_QUEUE_LENGTH tetap mengikuti WS_RX_SLOT_COUNT -> 8
 ```
 
-Tidak ada perubahan pada:
-
-- I2S v6.1.5.
-- INMP441.
-- MAX98357A.
-- Mic 16 kHz.
-- Speaker 24 kHz.
-- Audio ring 32 KB.
-- Prebuffer 12 KB.
-- Volume processing tetap OFF.
-- OLED tetap OFF.
-- PING tetap OFF.
+Tidak ada perubahan pada I2S, audio ring, prebuffer, volume, OLED, atau PING.
 
 ### Hasil hardware v7.0.31
 
-Firmware berhasil boot, Wi-Fi/DNS/TCP/WSS dan `setupComplete` berhasil. Namun koneksi kembali putus **sebelum burst audio RX dimulai**:
+Firmware berhasil boot, Wi-Fi/DNS/TCP/WSS dan `setupComplete` berhasil. Namun koneksi kembali putus sebelum burst audio RX dimulai:
 
 ```text
 WS_EVENT: WebSocket TERHUBUNG ke Gemini!
 WS_JSON: Gemini setupComplete: SESI SIAP
-WS_JSON: Session resumption handle tersimpan
 E transport_ws: Error transport_poll_write(0)
 E websocket_client: esp_transport_write() returned 0
 W WS_EVENT: Connection generation invalidated
 W WS_EVENT: WebSocket TERPUTUS dari Gemini
 ```
 
-Karena putus terjadi sekitar 16,7 detik dan sebelum log `AUDIO GEMINI`, perubahan slot RX v7.0.31 **belum bisa dinilai**. Ini penting: jangan menganggap v7.0.31 gagal karena slot RX; masalah TX muncul lebih dulu.
-
-### Temuan penting
-
-Source `main` setelah v7.0.31 masih memakai:
-
-```text
-AUDIO_SEND_TIMEOUT = 150 ms
-network_timeout_ms = 10000
-retry = tidak ada
-```
-
-Padahal hasil hardware v7.0.30 yang dijadikan referensi menggunakan tuning TX yang lebih longgar. Jadi v7.0.32 harus lebih dulu menyamakan source dengan konfigurasi TX yang sudah terbukti pada hasil referensi.
+Karena putus terjadi sebelum audio RX dimulai, perubahan slot RX v7.0.31 belum bisa dinilai secara adil. Masalah TX muncul lebih dulu.
 
 **Status:** RX slot tuning dipertahankan, tetapi validasi ditunda sampai TX stabil kembali.
 
@@ -270,7 +289,7 @@ Padahal hasil hardware v7.0.30 yang dijadikan referensi menggunakan tuning TX ya
 
 ### Perubahan firmware
 
-Pada `components/websocket/websocket_mgr.cpp`:
+Pada WebSocket TX:
 
 ```text
 AUDIO_SEND_TIMEOUT      = 1000 ms
@@ -290,49 +309,75 @@ WS_RX_QUEUE_LENGTH = 8
 
 ### Kenapa ini dilakukan
 
-Log v7.0.31 menunjukkan error yang sama seperti masalah TX sebelumnya:
+Log v7.0.31 kembali menunjukkan `transport_poll_write(0)` sebelum audio RX. Jadi timing TX v7.0.30 yang sudah terbukti berhasil dikembalikan.
+
+### Hasil hardware v7.0.32
+
+TX tidak langsung gagal seperti v7.0.31, tetapi muncul masalah baru yang lebih jelas:
+
+```text
+task_wdt: - IDLE1
+CPU 1: audio_playback
+```
+
+Kemudian WebSocket mengalami lock timeout dan akhirnya:
 
 ```text
 transport_poll_write(0)
 esp_transport_write() returned 0
 ```
 
-dan terjadi sebelum audio RX masuk. Jadi jangan menambah tuning RX lagi dulu. Kita kembalikan timing TX yang sudah pernah menghasilkan **full Gemini turn berhasil**.
-
-### Yang sengaja TIDAK diubah
-
-- Audio/I2S v6.1.5.
-- INMP441.
-- MAX98357A.
-- Mic 16 kHz.
-- Speaker 24 kHz.
-- Audio ring 32 KB.
-- Prebuffer 12 KB.
-- Volume processing.
-- OLED.
-- Session resumption.
-- RX slot expansion v7.0.31.
-
-### Target test v7.0.32
-
-Urutan keberhasilan yang dicari:
+Log juga menunjukkan:
 
 ```text
-Wi-Fi READY
- -> DNS OK
- -> TCP 443 OK
- -> WebSocket CONNECTED
- -> setupComplete
- -> tidak ada transport_poll_write(0)
- -> AUDIO GEMINI masuk
- -> GENERATION COMPLETE
- -> TURN COMPLETE
- -> AUDIO PLAYBACK COMPLETE
+TX audio write timeout/fail: attempt=1 sent=0 expected=2209 pcm_chunk=1600 offset=1600/3200 timeout=1000ms
+TX audio command dihentikan: sent_pcm=1600/3200
 ```
 
-Jika sudah sampai audio RX tetapi muncul `buffer_drop`, `seq_err`, atau `queue_hwm`, baru kita lanjut tuning RX. Jangan mengubah baseline audio v6.1.5.
+**Kesimpulan:** v7.0.32 berhasil membawa kita melewati tahap TX awal, tetapi menemukan bottleneck yang lebih spesifik: `audio_playback` terlalu lama memblokir CPU1 dan menyebabkan watchdog/lock contention.
 
-**Status: FIRMWARE v7.0.32 SUDAH DITERAPKAN DI MAIN — MENUNGGU HARDWARE LOG.**
+**Status: superseded by v7.0.33.**
+
+---
+
+## v7.0.33 — Audio Playback WDT Mitigation — August 20, 2026
+
+Fokus v7.0.33 adalah masalah yang ditemukan langsung pada hardware v7.0.32: `audio_playback` memblokir CPU1 terlalu lama sehingga `IDLE1` gagal mendapat waktu dan Task WDT aktif.
+
+Perubahan utama di `audio_hal.cpp`:
+
+```text
+I2S write sebelumnya : portMAX_DELAY
+I2S write sekarang   : timeout 50 ms
+Chunk write          : 512 PCM samples
+```
+
+Jika I2S timeout/gagal atau tidak menulis data, jalur speaker tidak boleh terus memblokir CPU. Fungsi memberi kesempatan scheduler dengan `vTaskDelay(1)` lalu keluar.
+
+**Yang tetap dikunci:**
+
+- I2S v6.1.5.
+- Mic 16 kHz.
+- Speaker 24 kHz.
+- INMP441.
+- MAX98357A.
+- Audio ring 32 KB.
+- Prebuffer 12 KB.
+- Volume processing OFF.
+- OLED OFF.
+- PING OFF.
+
+**Target hardware test:**
+
+```text
+Tidak ada task_wdt IDLE1
+Tidak ada CPU 1: audio_playback WDT
+WebSocket tetap connected
+Audio RX tetap berjalan
+AUDIO PLAYBACK COMPLETE
+```
+
+**Status: MENUNGGU HARDWARE LOG v7.0.33**
 
 ---
 
