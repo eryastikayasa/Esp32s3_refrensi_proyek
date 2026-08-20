@@ -627,6 +627,96 @@ Jangan mengubah I2S v6.1.5, INMP441, MAX98357A, atau format 16 kHz mic / 24 kHz 
 
 ---
 
+## v7.0.36 — Audio RX Buffer Headroom Tuning — August 20, 2026
+
+### Dasar perubahan
+
+Hasil hardware v7.0.35 menunjukkan idle sudah stabil dan respons Gemini berhasil, tetapi saat burst audio RX terjadi tekanan pada audio queue:
+
+```text
+Audio PCM drop terukur: 514 byte
+Audio PCM drop terukur: 1018 byte
+Audio PCM drop terukur: 494 byte
+Audio PCM drop terukur: 1010 byte
+
+dropped_frag=15
+seq_err=12
+buffer_drop=3
+pending=31742/32768
+AUDIO PLAYBACK UNDERRUN
+```
+
+Karena ring 32 KB hampir penuh dan masih terjadi drop/underrun, v7.0.36 difokuskan pada **memberi headroom lebih besar pada buffering audio RX**.
+
+### Perubahan v7.0.36
+
+Buffer audio dinaikkan:
+
+```text
+ring      : 32768 -> 49152 byte
+prebuffer : 12288 -> 16384 byte
+```
+
+Waktu tunggu pengisian ring pada jalur playback juga dilonggarkan:
+
+```text
+5 ms -> 10 ms
+```
+
+Tujuannya memberi waktu agar burst PCM dari Gemini terkumpul lebih banyak sebelum playback mengejar data berikutnya.
+
+### Yang tidak diubah
+
+- I2S v6.1.5 tetap LOCKED.
+- INMP441 tetap.
+- MAX98357A tetap.
+- Mic tetap 16 kHz.
+- Speaker tetap 24 kHz.
+- Format PCM tetap PCM16 mono.
+- I2S/DMA tidak diubah.
+- MIC TX gate v7.0.35 tetap.
+- RX slot tetap 8.
+- RX queue tetap 8.
+- Volume processing tetap OFF.
+- OLED tetap OFF.
+- PING tetap OFF.
+- TX timeout tetap 1000 ms.
+- Retry tetap 1x dengan delay 30 ms.
+
+### Target hardware test
+
+Tes dilakukan dengan pola yang sama:
+
+```text
+Gemini setupComplete
+        ↓
+diam sekitar 30 detik
+        ↓
+bicara: "halo gemini"
+        ↓
+biarkan respons selesai
+```
+
+Yang harus dibandingkan dengan v7.0.35:
+
+```text
+Audio PCM drop
+pending maksimum
+received / queued / played
+buffer_drop
+seq_err
+AUDIO PLAYBACK UNDERRUN
+AUDIO PLAYBACK COMPLETE
+```
+
+### Kesimpulan sementara
+
+v7.0.36 adalah **buffer/headroom tuning**, bukan perubahan I2S. Keberhasilan atau kegagalannya harus ditentukan dari log hardware berikutnya.
+
+**Status: MENUNGGU HASIL HARDWARE TEST**
+
+---
+
 ## Project Rule — Jangan Kembali ke Awal
 
 Setiap tuning berikutnya wajib:
