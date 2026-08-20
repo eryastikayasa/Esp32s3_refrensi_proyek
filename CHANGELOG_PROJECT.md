@@ -1,327 +1,165 @@
 # ESP32-S3 Voice Commander — Project Changelog
 
-Dokumen ini mencatat milestone, baseline, perubahan arsitektur penting, dan hasil debugging yang relevan untuk melanjutkan proyek.
+Dokumen ini mencatat milestone, baseline, perubahan arsitektur penting, hasil hardware test, dan keputusan tuning agar konteks proyek tidak hilang saat pekerjaan dilanjutkan oleh AI.
 
-> Ini bukan daftar setiap commit. Hanya perubahan dan keputusan teknis yang penting untuk konteks AI.
+> Jangan menghapus sejarah yang masih relevan. Tambahkan milestone baru.
 
 ---
 
 ## v6.1.3 — I2S Technical Test Baseline
 
-- Dibuat baseline teknis untuk pengujian jalur speaker I2S secara deterministik.
-- Digunakan test tone 1 kHz untuk memisahkan masalah I2S dari masalah Gemini/WebSocket.
-- Tujuan utama: memastikan jalur TX I2S dan MAX98357A dapat diuji tanpa ketergantungan pada koneksi Gemini.
+- Baseline test tone 1 kHz untuk memisahkan masalah I2S dari Gemini/WebSocket.
+- Digunakan untuk validasi jalur TX I2S dan MAX98357A.
 
-### Status
-Baseline historis.
+**Status:** historical baseline.
 
 ---
 
 ## v6.1.5 — Audio Baseline LOCKED
 
-- Microphone INMP441 terbukti bekerja.
-- Output speaker melalui MAX98357A terbukti bekerja.
-- Konfigurasi audio/I2S pada tahap ini ditetapkan sebagai **technical audio baseline**.
+- INMP441 microphone terbukti bekerja.
+- MAX98357A speaker terbukti bekerja.
+- Audio/I2S ditetapkan sebagai baseline teknis.
+- Mic 16 kHz, speaker 24 kHz.
 
-### Keputusan penting
-**v6.1.5 tidak boleh diubah sembarangan.**
+**Keputusan:** jangan mengubah konfigurasi I2S v6.1.5 selama investigasi WebSocket/audio buffering.
 
-Perubahan audio berikutnya harus mempertahankan fungsi yang telah terbukti atau disertai bukti pengujian yang cukup untuk menetapkan baseline baru.
-
-### Status
-**LOCKED / REFERENCE BASELINE**
+**Status: LOCKED / REFERENCE BASELINE**
 
 ---
 
 ## v7 — Language / Speech Development
 
-- Pengembangan fitur bahasa dan output speech dimulai di atas baseline audio.
-- Fokus bergeser dari validasi hardware/audio dasar menuju integrasi voice assistant.
-
-### Status
-Milestone historis.
+Pengembangan voice assistant dan speech dimulai di atas baseline audio v6.1.5.
 
 ---
 
 ## v7.0.1 — Indonesian Language / Speech
 
-- Penyesuaian bahasa/output speech untuk penggunaan Bahasa Indonesia.
-- Audio baseline tetap dipertahankan.
-
-### Status
-Milestone historis.
+Penyesuaian language/output speech ke Bahasa Indonesia tanpa mengubah baseline audio.
 
 ---
 
 ## v7.0.2 — WebSocket Crash Investigation
 
-Fokus utama berpindah ke crash pada lifecycle WebSocket.
-
-Crash path yang dianalisis mencakup:
+Fokus pada crash lifecycle WebSocket, termasuk jalur:
 
 ```text
 ws_poll_read()
-    -> esp_transport_poll_read()
-        -> esp_websocket_client_task()
+ -> esp_transport_poll_read()
+ -> esp_websocket_client_task()
 ```
-
-### Status
-Dilanjutkan ke v7.0.3.
 
 ---
 
 ## v7.0.3 — WebSocket Lifecycle / Race Mitigation
 
-Dilakukan mitigasi terhadap kemungkinan race condition dan lifecycle WebSocket:
-
 - Setup Gemini dipindahkan ke task terpisah.
-- Diperkenalkan **connection generation** untuk membedakan setup dari koneksi lama dan koneksi baru.
-- Setup task dari koneksi lama dapat dibatalkan/diinvalidasi ketika generasi koneksi berubah.
-- Kondisi koneksi diperiksa sebelum melakukan send.
-- WebSocket send diberikan timeout agar tidak menunggu tanpa batas.
-
-### Status
-Dilanjutkan ke v7.0.4.
+- Diperkenalkan connection generation.
+- Setup task dari koneksi lama dapat diinvalidasi.
+- Connection check dilakukan sebelum send.
+- Send diberi timeout.
 
 ---
 
 ## v7.0.4 — WebSocket Crash Resolution Focus
 
-- Fokus pada penyelesaian crash setelah mitigasi v7.0.3.
-- Area yang disentuh mencakup lifecycle Wi-Fi, main application flow, dan WebSocket manager.
-- Investigasi crash juga menggunakan hasil `addr2line` yang mengarah ke jalur SSL/WebSocket initialization.
-
-### Status
-Milestone debugging historis; runtime terbaru menunjukkan koneksi Gemini sudah berhasil.
+Fokus pada penyelesaian crash setelah v7.0.3, termasuk lifecycle Wi-Fi/main/WebSocket dan analisis `addr2line` pada SSL/WebSocket initialization.
 
 ---
 
-## TLS / Certificate Troubleshooting — Historical Milestone
+## TLS / Certificate Troubleshooting — Historical
 
-Sebelum WebSocket berhasil terhubung, proyek mengalami kegagalan TLS terhadap `generativelanguage.googleapis.com:443`.
-
-Log penting yang pernah muncul:
+Pernah terjadi kegagalan certificate bundle terhadap `generativelanguage.googleapis.com:443`:
 
 ```text
-esp-x509-crt-bundle: No matching trusted root certificate found
-esp-x509-crt-bundle: Failed to verify certificate
-esp-tls-mbedtls: mbedtls_ssl_handshake returned -0x3000
-esp-tls: Failed to open new connection
-transport_ws: Error connecting to host generativelanguage.googleapis.com:443
+No matching trusted root certificate found
+Failed to verify certificate
+mbedtls_ssl_handshake returned -0x3000
 ```
 
-### Kesimpulan
-DNS dan TCP kemudian terbukti berhasil, dan Gemini WebSocket akhirnya berhasil terhubung. TLS certificate verification bukan blocker utama pada fase sekarang.
-
----
-
-## WebSocket Connection Success — August 20, 2026
-
-Runtime log terbaru menunjukkan:
-
-```text
-WS_EVENT: WebSocket TERHUBUNG ke Gemini!
-WS_EVENT: Connection generation=1
-DISPLAY: [OLED STATUS]: AI Terhubung...
-```
-
-### Status
-**VERIFIED IN RUNTIME LOG**
+Kemudian DNS dan TCP 443 terbukti OK dan WSS Gemini berhasil.
 
 ---
 
 ## Audio Tuning — Volume Processing Disabled — August 20, 2026
 
-Pada commit firmware `9a5026d4` dilakukan perubahan khusus untuk uji kestabilan audio.
-
-### Perubahan
-- Pemrosesan volume Gemini dinonaktifkan sementara.
+- Volume processing Gemini dinonaktifkan.
 - Volume dipaksa 100%.
-- Scaling PCM sample-per-sample pada jalur `queue_audio_pcm()` dilewati.
-- PCM Gemini langsung dikirim ke ring buffer.
+- PCM Gemini dikirim langsung ke ring buffer.
+- I2S, INMP441, MAX98357A, dan baseline v6.1.5 tidak diubah.
 
-### Yang tidak diubah
-- I2S.
-- MAX98357A.
-- Ring buffer 32 KB.
-- Prebuffer 12 KB.
-- Playback wait 5 ms.
-- Playback task priority 7.
-- Baseline audio v6.1.5.
+Current audio buffering sebelum v7.0.31:
 
-### Status
-**VOLUME PROCESSING REMAINS DISABLED**
+```text
+ring=32768
+prebuffer=12288
+target=48000 B/s
+```
+
+**Status:** volume processing tetap OFF selama stability investigation.
 
 ---
 
 ## OLED OFF — Audio Isolation Test — August 20, 2026
 
-OLED dan akses I2C OLED dinonaktifkan sementara untuk mengisolasi masalah audio/WebSocket.
+OLED/I2C dimatikan untuk isolasi audio.
 
-### Hasil runtime
-Pada firmware `e860367`:
+Hasil: timeout I2C sebelumnya tidak muncul. Wi-Fi, DNS, TCP, WSS Gemini, setupComplete, dan RX audio tetap berhasil.
 
-```text
-DISPLAY: OLED DISABLED - audio stability test
-```
-
-Timeout I2C yang sebelumnya berulang tidak lagi muncul. Wi-Fi, DNS, TCP 443, WebSocket Gemini, setupComplete, dan RX audio tetap berhasil.
-
-Kemudian ditemukan masalah WebSocket:
-
-```text
-websocket_client: Could not lock ws-client within 2000 timeout for PING
-```
-
-### Kesimpulan
-OLED/I2C bukan kandidat utama untuk masalah runtime tersebut.
-
-### Status
-**OLED-OFF TEST VERIFIED — I2C TIMEOUT GONE**
+**Status:** OLED tetap OFF selama fase audio/RX isolation.
 
 ---
 
-## v7.0.27 — WebSocket Audio TX Lock Tuning — August 20, 2026
+## v7.0.27 — WebSocket Audio TX Lock Tuning
 
-Runtime OLED-OFF menunjukkan:
+- Timeout audio TX diturunkan dari 5000 ms ke 250 ms.
+- Frame audio yang gagal dibuang tanpa langsung mematikan koneksi.
+- Logging TX diperjelas.
 
-```text
-Could not lock ws-client within 2000 timeout for PING
-```
-
-Audio microphone dikirim setiap 3200 byte melalui TX worker. Timeout `esp_websocket_client_send_text()` audio sebelumnya dapat mencapai 5000 ms.
-
-### Perubahan
-- Timeout pengiriman audio diturunkan dari 5000 ms menjadi 250 ms.
-- Frame audio yang timeout/fail dibuang.
-- Kegagalan satu frame tidak langsung mematikan koneksi WebSocket.
-- Logging TX audio diperjelas.
-- TX queue dan kebijakan drop frame lama dipertahankan.
-
-### Status
-**TESTED — PING LOCK REMAINED AN ISSUE**
+**Hasil:** masalah PING/ws-client lock masih ada.
 
 ---
 
-## v7.0.28 — WebSocket PING Lock Diagnostic — August 20, 2026
+## v7.0.28 — WebSocket PING Diagnostic
 
-### Perubahan
-- WebSocket keep-alive PING dinonaktifkan sementara.
-- Jalur audio, RX worker, ring buffer, I2S, MAX98357A, dan volume processing tidak diubah.
+- WebSocket keep-alive PING dimatikan.
+- Jalur I2S/audio tidak diubah.
 
-### Tujuan
-Menguji apakah PING/keep-alive menjadi pemicu WebSocket macet atau hanya korban dari lock yang sudah tertahan.
-
-### Status
-**SUPERSEDED BY v7.0.29**
+**Status:** superseded by v7.0.29.
 
 ---
 
-## v7.0.29 — WebSocket Audio TX Diagnostic — August 20, 2026
+## v7.0.29 — WebSocket Audio TX Diagnostic
 
-Setelah PING dimatikan, sistem berhasil menerima audio Gemini tetapi koneksi kemudian gagal ketika jalur TX realtime aktif.
-
-### Runtime evidence
-
-```text
-WS_EVENT: WebSocket TERHUBUNG ke Gemini!
-WS_JSON: Gemini setupComplete: SESI SIAP
-WS_JSON: AUDIO GEMINI: 1920 byte -> AUDIO BUFFER
-WS_JSON: AUDIO GEMINI: 5760 byte -> AUDIO BUFFER
-```
-
-Statistik RX tetap sehat:
-
-```text
-seq_err=0
-buffer_drop=0
-queue_drop=0
-invalid=0
-oversize=0
-```
-
-Audio sempat berjalan:
-
-```text
-received=88320
-queued=88238
-played=88238
-dropped=0
-```
-
-Kemudian:
+Gemini berhasil connect, setupComplete, dan RX audio berjalan. Kemudian muncul:
 
 ```text
 E transport_ws: Error transport_poll_write(0)
 E websocket_client: esp_transport_write() returned 0
 E WS_EVENT: WebSocket Error!
-W WS_EVENT: WebSocket TERPUTUS dari Gemini
 ```
 
-### Kesimpulan
-Pada titik ini:
+Masalah dipersempit ke realtime WebSocket/TLS TX, bukan DNS/TCP/setup/RX dasar.
 
-- Wi-Fi: **PASS**
-- DNS: **PASS**
-- TCP 443: **PASS**
-- TLS/WebSocket handshake: **PASS**
-- Gemini setup: **PASS**
-- Gemini RX: **PASS**
-- Audio playback: **PASS sebagian**
-- WebSocket/TLS TX realtime: **FAIL**
-
-Masalah telah dipersempit ke **jalur WebSocket/TLS write saat realtime audio TX**, bukan OLED, DNS, TCP, Gemini setup, atau RX parser.
-
-### Status
-**ACTIVE INVESTIGATION — WEBSOCKET/TLS AUDIO TX**
+**Status: superseded by v7.0.30.**
 
 ---
 
 ## v7.0.30 — WebSocket Audio TX Write Retry Tuning — August 20, 2026
 
-### Latar belakang
-
-Firmware v7.0.29 menunjukkan bahwa koneksi Gemini, `setupComplete`, RX audio, dan playback dapat berjalan. Kegagalan terjadi ketika jalur realtime TX melakukan:
-
-```text
-E transport_ws: Error transport_poll_write(0)
-E websocket_client: esp_transport_write() returned 0
-```
-
-Pada pengujian berikutnya, kegagalan bahkan terjadi sangat awal setelah `setupComplete`, sehingga timeout TX yang terlalu pendek perlu diuji sebagai kemungkinan faktor.
-
 ### Perubahan
 
-- Timeout TX audio dinaikkan dari **150 ms menjadi 1000 ms**.
-- Ditambahkan **1 kali retry** untuk audio write yang gagal.
-- Retry dilakukan setelah jeda singkat **30 ms**.
-- Retry hanya dilakukan bila koneksi WebSocket dan `connection generation` masih valid.
-- `network_timeout_ms` dinaikkan dari **10 s menjadi 15 s** untuk memberi margin pada operasi jaringan.
-- WebSocket keep-alive **PING tetap OFF** selama investigasi.
+- Audio TX timeout: 150 ms -> 1000 ms.
+- Retry audio write: 1 kali.
+- Retry delay: 30 ms.
+- Retry hanya jika connection generation masih valid.
+- Network timeout: 10 s -> 15 s.
+- WebSocket PING tetap OFF.
 
-### Yang tidak diubah
+### Hardware result
 
-- I2S.
-- Konfigurasi INMP441.
-- Konfigurasi MAX98357A.
-- Sample rate microphone 16 kHz.
-- Sample rate speaker 24 kHz.
-- Ring buffer audio 32 KB.
-- Prebuffer 12 KB.
-- PCM chunk 3200 byte.
-- WebSocket audio chunk 1600 byte.
-- Audio baseline **v6.1.5**.
-- OLED tetap OFF untuk isolasi masalah.
-
-### Tujuan pengujian
-
-Menentukan apakah `transport_poll_write(0)` disebabkan oleh timeout TX yang terlalu agresif atau merupakan kegagalan yang lebih fundamental pada jalur WebSocket/TLS write realtime.
-
-### Hasil hardware test
-
-v7.0.30 berhasil boot, mendapatkan IP, lolos DNS/TCP, terhubung ke Gemini, menerima `setupComplete`, menerima burst audio, mencapai `GENERATION COMPLETE` dan `TURN COMPLETE`, serta tidak mengalami `transport_poll_write(0)` / `esp_transport_write() returned 0` atau disconnect sampai turn selesai.
-
-Bukti runtime:
+Full Gemini turn berhasil:
 
 ```text
 WS_EVENT: WebSocket TERHUBUNG ke Gemini!
@@ -332,59 +170,105 @@ WS_AUDIO: AUDIO PLAYBACK COMPLETE: received=375834 queued=373488 played=373488 p
 WS_JSON: AUDIO SUMMARY: chunks=370 received=375834 played=373488 pending=0 write_calls=183
 ```
 
-### Masalah baru yang terukur
+Tidak terjadi `transport_poll_write(0)` atau disconnect sebelum turn selesai.
 
-Burst RX/audio menimbulkan tekanan buffer dan fragment handling:
-
-```text
-WS_RX: RX STATS ... dropped_frag=12 seq_err=10 buffer_drop=2
-WS_RX: RX STATS ... dropped_frag=34 seq_err=31 buffer_drop=3
-WS_RX: RX STATS ... dropped_frag=49 seq_err=45 buffer_drop=4
-```
-
-Audio queue mengalami drop terukur:
+### Bottleneck yang ditemukan
 
 ```text
-WS_AUDIO: Audio PCM drop terukur: 38 byte
-WS_AUDIO: Audio PCM drop terukur: 998 byte
-WS_AUDIO: Audio PCM drop terukur: 774 byte
-WS_AUDIO: Audio PCM drop terukur: 180 byte
+dropped_frag=12 seq_err=10 buffer_drop=2
+dropped_frag=34 seq_err=31 buffer_drop=3
+dropped_frag=49 seq_err=45 buffer_drop=4
 ```
 
-Ring buffer sempat hampir penuh:
+Audio queue drop:
+
+```text
+38 byte
+998 byte
+774 byte
+180 byte
+```
+
+Ring buffer mencapai:
 
 ```text
 pending=31510/32768
 ```
 
-Total akhir:
+Satu playback underrun masih muncul, tetapi audio akhirnya drain ke zero.
+
+**Kesimpulan:** TX WRITE PATH VERIFIED IMPROVED. Fokus pindah ke RX fragment/slot pressure dan audio queue backpressure.
+
+---
+
+## v7.0.31 — RX Persistent Slot Headroom Tuning — August 20, 2026
+
+### Dasar tuning
+
+v7.0.30 menunjukkan:
 
 ```text
-received=375834
-queued=373488
-played=373488
-dropped=1990
+queue_hwm=4
+buffer_drop=4
 ```
 
-Masih terdapat satu `AUDIO PLAYBACK UNDERRUN` setelah `GENERATION COMPLETE`, tetapi audio akhirnya berhasil drain sampai `pending=0`.
+dan log berulang:
 
-### Analisis
+```text
+RX slot persistent: slot=...
+RX BUFFER DROP: no free slot
+```
 
-v7.0.30 memberikan bukti kuat bahwa menaikkan timeout TX dan menambahkan retry **menghilangkan kegagalan WebSocket/TLS write pada pengujian ini**. Namun sistem sekarang menunjukkan bottleneck berbeda pada jalur **RX burst handling + audio queue/backpressure**.
+RX queue dan persistent slot pool sebelumnya sama-sama berjumlah **6**:
 
-Ini menggeser fokus investigasi dari **WebSocket/TLS TX failure** menjadi:
+```text
+WS_RX_SLOT_COUNT 6
+WS_RX_QUEUE_LENGTH WS_RX_SLOT_COUNT
+```
 
-1. RX fragment pressure.
-2. Sequence errors.
-3. RX buffer drops.
-4. Audio queue backpressure.
-5. Playback underrun saat burst/akhir turn.
+Dengan burst Gemini, empat `buffer_drop` menunjukkan pool dapat habis sebelum worker RX selesai membebaskan slot.
 
-Semua ini harus ditangani tanpa mengubah baseline I2S v6.1.5.
+### Perubahan firmware
+
+Pada repository firmware `eryastikayasa/esp32s3_voice_geminiproject`:
+
+```text
+WS_RX_SLOT_COUNT: 6 -> 8
+WS_RX_QUEUE_LENGTH: tetap mengikuti WS_RX_SLOT_COUNT -> 8
+```
+
+Tidak ada perubahan pada:
+
+- I2S v6.1.5.
+- INMP441.
+- MAX98357A.
+- Mic 16 kHz.
+- Speaker 24 kHz.
+- Audio ring 32 KB.
+- Prebuffer 12 KB.
+- WebSocket TX timeout/retry v7.0.30.
+- PING tetap OFF.
+- OLED tetap OFF.
+
+### Tujuan
+
+Memberi headroom dua slot tambahan untuk burst RX tanpa mengubah jalur audio/I2S. Tuning ini secara khusus menargetkan `buffer_drop` dan `queue_hwm`, bukan mencoba menyembunyikan `seq_err`.
 
 ### Status
-**TX WRITE PATH: VERIFIED IMPROVED**  
-**RX/AUDIO BUFFER PRESSURE: ACTIVE INVESTIGATION**
+
+**FIRMWARE TUNED — MENUNGGU HARDWARE LOG v7.0.31**
+
+### Kriteria keberhasilan
+
+Target utama:
+
+```text
+buffer_drop -> 0
+queue_hwm < 8
+queue_drop -> 0
+```
+
+Kemudian lihat apakah `dropped_frag` dan `seq_err` ikut turun. Jika `seq_err` tetap tinggi walaupun `buffer_drop=0`, investigasi berikutnya harus fokus pada validitas `payload_offset`/fragment ordering, bukan menambah slot lagi.
 
 ---
 
@@ -392,25 +276,35 @@ Semua ini harus ditangani tanpa mengubah baseline I2S v6.1.5.
 
 Per 20 Agustus 2026:
 
-1. Gemini WebSocket sudah berhasil terhubung dan satu turn penuh dapat selesai.
-2. Audio v6.1.5 tetap menjadi baseline yang dilindungi.
-3. Pemrosesan volume masih dinonaktifkan untuk uji kestabilan.
-4. OLED/I2C dinonaktifkan sementara dan timeout I2C tidak muncul pada pengujian OLED-OFF.
-5. WebSocket keep-alive PING dinonaktifkan sementara.
-6. v7.0.30 menunjukkan jalur WebSocket/TLS TX dapat bertahan sampai satu Gemini turn selesai.
-7. Fokus utama sekarang bergeser ke **RX fragment pressure, sequence errors, buffer drops, dan audio queue backpressure**.
-8. Jangan mengubah konfigurasi I2S v6.1.5 selama investigasi ini.
-9. Perubahan berikutnya harus berupa tuning terukur dan diverifikasi dengan log hardware.
-
-Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
+1. Gemini WebSocket dapat connect dan full turn sudah terbukti selesai.
+2. WebSocket/TLS TX v7.0.30 terbukti jauh lebih stabil pada hardware test.
+3. Audio/I2S v6.1.5 tetap **LOCKED**.
+4. Volume processing tetap OFF.
+5. OLED/I2C tetap OFF selama isolation.
+6. PING tetap OFF.
+7. v7.0.31 sekarang menguji peningkatan RX persistent slot pool dari 6 ke 8.
+8. Jangan menaikkan ring buffer secara buta; v7.0.30 menunjukkan largest free block sekitar 31 KB, sehingga alokasi ring internal yang lebih besar berisiko gagal.
+9. Fokus berikutnya ditentukan dari log v7.0.31:
+   - pertama `buffer_drop` / `queue_hwm`;
+   - kemudian `dropped_frag` / `seq_err`;
+   - kemudian PCM drop dan underrun.
+10. Jangan menyentuh I2S v6.1.5.
 
 ---
 
 # Documentation Rule
 
-Jika sebuah perubahan menghasilkan keputusan teknis penting atau baseline baru:
+Setiap tuning harus dicatat dengan:
 
-1. Catat milestone di file ini.
-2. Perbarui `CURRENT_STATE.md` jika kondisi aktif berubah.
-3. Perbarui `PROJECT_CONTEXT.md` jika informasi tersebut menjadi pengetahuan proyek yang stabil.
-4. Jangan menghapus sejarah yang masih relevan; tambahkan milestone baru.
+1. nomor versi;
+2. file yang diubah;
+3. parameter sebelum/sesudah;
+4. alasan berdasarkan log;
+5. hal yang sengaja tidak diubah;
+6. hasil build/hardware test;
+7. metrik log sebelum/sesudah;
+8. keputusan tuning berikutnya.
+
+`CHANGELOG_PROJECT.md` = sejarah keputusan teknis.
+`CURRENT_STATE.md` = kondisi aktif saat ini.
+`PROJECT_CONTEXT.md` = pengetahuan proyek yang stabil.
