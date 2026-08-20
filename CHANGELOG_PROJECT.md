@@ -277,6 +277,51 @@ Masalah telah dipersempit ke **jalur WebSocket/TLS write saat realtime audio**, 
 
 ---
 
+## v7.0.30 — WebSocket Audio TX Write Retry Tuning — August 20, 2026
+
+### Latar belakang
+
+Firmware v7.0.29 menunjukkan bahwa koneksi Gemini, `setupComplete`, RX audio, dan playback dapat berjalan. Kegagalan terjadi ketika jalur realtime TX melakukan:
+
+```text
+E transport_ws: Error transport_poll_write(0)
+E websocket_client: esp_transport_write() returned 0
+```
+
+Pada pengujian berikutnya, kegagalan bahkan terjadi sangat awal setelah `setupComplete`, sehingga timeout TX yang terlalu pendek perlu diuji sebagai kemungkinan faktor.
+
+### Perubahan
+
+- Timeout TX audio dinaikkan dari **150 ms menjadi 1000 ms**.
+- Ditambahkan **1 kali retry** untuk audio write yang gagal.
+- Retry dilakukan setelah jeda singkat **30 ms**.
+- Retry hanya dilakukan bila koneksi WebSocket dan `connection generation` masih valid.
+- `network_timeout_ms` dinaikkan dari **10 s menjadi 15 s** untuk memberi margin pada operasi jaringan.
+- WebSocket keep-alive **PING tetap OFF** selama investigasi.
+
+### Yang tidak diubah
+
+- I2S.
+- Konfigurasi INMP441.
+- Konfigurasi MAX98357A.
+- Sample rate microphone 16 kHz.
+- Sample rate speaker 24 kHz.
+- Ring buffer audio 32 KB.
+- Prebuffer 12 KB.
+- PCM chunk 3200 byte.
+- WebSocket audio chunk 1600 byte.
+- Audio baseline **v6.1.5**.
+- OLED tetap OFF untuk isolasi masalah.
+
+### Tujuan pengujian
+
+Menentukan apakah `transport_poll_write(0)` disebabkan oleh timeout TX yang terlalu agresif atau merupakan kegagalan yang lebih fundamental pada jalur WebSocket/TLS write realtime.
+
+### Status
+**READY FOR HARDWARE TEST — v7.0.30**
+
+---
+
 # Current Development Direction
 
 Per 20 Agustus 2026:
@@ -286,8 +331,9 @@ Per 20 Agustus 2026:
 3. Pemrosesan volume masih dinonaktifkan untuk uji kestabilan.
 4. OLED/I2C dinonaktifkan sementara dan timeout I2C sudah hilang dari runtime.
 5. WebSocket keep-alive PING dinonaktifkan sementara.
-6. Masalah terbaru adalah `transport_poll_write(0)` / `esp_transport_write() returned 0` ketika realtime audio berjalan.
-7. Fokus berikutnya adalah isolasi jalur TX audio tanpa mengubah baseline I2S.
+6. Masalah utama adalah `transport_poll_write(0)` / `esp_transport_write() returned 0` ketika realtime audio TX berjalan.
+7. v7.0.30 menguji timeout TX 1000 ms + satu retry sebagai eksperimen terkontrol.
+8. Fokus berikutnya tetap pada isolasi jalur TX audio tanpa mengubah baseline I2S.
 
 Lihat `CURRENT_STATE.md` untuk status paling mutakhir.
 
