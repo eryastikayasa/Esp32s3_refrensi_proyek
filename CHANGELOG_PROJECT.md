@@ -683,37 +683,94 @@ Tujuannya memberi waktu agar burst PCM dari Gemini terkumpul lebih banyak sebelu
 - TX timeout tetap 1000 ms.
 - Retry tetap 1x dengan delay 30 ms.
 
-### Target hardware test
+### Hasil hardware v7.0.36
 
-Tes dilakukan dengan pola yang sama:
-
-```text
-Gemini setupComplete
-        ↓
-diam sekitar 30 detik
-        ↓
-bicara: "halo gemini"
-        ↓
-biarkan respons selesai
-```
-
-Yang harus dibandingkan dengan v7.0.35:
+Firmware berhasil boot dan seluruh jalur dasar berhasil:
 
 ```text
-Audio PCM drop
-pending maksimum
-received / queued / played
-buffer_drop
-seq_err
-AUDIO PLAYBACK UNDERRUN
-AUDIO PLAYBACK COMPLETE
+Wi-Fi GOT_IP - network READY
+DNS RESULT: OK
+TCP RESULT: OK
+NETWORK BASIC TEST = OK
+WebSocket TERHUBUNG ke Gemini!
+Gemini setupComplete: SESI SIAP
 ```
 
-### Kesimpulan sementara
+Audio Gemini berhasil diterima dan playback berhasil berjalan sampai drain selesai:
 
-v7.0.36 adalah **buffer/headroom tuning**, bukan perubahan I2S. Keberhasilan atau kegagalannya harus ditentukan dari log hardware berikutnya.
+```text
+WS_AUDIO: Audio playback task: 24kHz PCM16 mono, ring=49152, prebuffer=16384
+WS_AUDIO: Audio ring buffer siap: 49152 byte, prebuffer=16384, target=48000 B/s
+WS_JSON: AUDIO GEMINI: 2 byte -> AUDIO BUFFER
+WS_AUDIO: AUDIO FLOW: pending=16302/49152 received=18366 queued=18350 played=2048 dropped=0
+WS_AUDIO: AUDIO FLOW: pending=18810/49152 received=70080 queued=70010 played=51200 dropped=0
+WS_JSON: AUDIO GEMINI: 1920 byte -> AUDIO BUFFER
+WS_AUDIO: AUDIO FLOW: pending=24386/49152 received=124863 queued=124738 played=100352 dropped=0
+WS_AUDIO: AUDIO FLOW: pending=49130/49152 received=198831 queued=198634 played=149504 dropped=0
+```
 
-**Status: MENUNGGU HASIL HARDWARE TEST**
+Pada titik ini ring buffer hampir penuh. Terjadi satu drop PCM yang terukur:
+
+```text
+Audio PCM drop terukur: 988 byte
+AUDIO STREAM: queue PCM gagal len=1023
+```
+
+Statistik RX saat burst audio menunjukkan tekanan fragment/sequence:
+
+```text
+fragments=254 dropped_frag=2 messages=56 queue_hwm=1 seq_err=1 buffer_drop=1
+```
+
+Setelah Gemini selesai mengirim audio:
+
+```text
+Gemini: GENERATION COMPLETE
+Gemini: TURN COMPLETE - menunggu audio drain
+```
+
+Audio kemudian berhasil drain sampai nol:
+
+```text
+AUDIO SUMMARY: chunks=210 received=205992 played=178176 pending=24576 write_calls=87
+AUDIO FLOW: pending=6144/49152 received=205992 queued=204800 played=198656 dropped=988
+AUDIO PLAYBACK COMPLETE: received=205992 queued=204800 played=204800 pending=0 dropped=988 balance=204
+```
+
+### Hasil penting v7.0.36
+
+**Berhasil:**
+
+- Wi-Fi stabil.
+- DNS OK.
+- TCP 443 OK.
+- TLS/WSS Gemini OK.
+- `setupComplete` OK.
+- Session resumption tetap berjalan.
+- MIC TX gate tetap bekerja saat idle.
+- Gemini berhasil mengirim audio.
+- Speaker berhasil memainkan audio sampai selesai.
+- Ring 49 KB berhasil menyerap burst jauh lebih besar dibanding ring 32 KB.
+- Tidak ada `task_wdt`/reset pada log ini.
+- Audio akhirnya drain sampai `pending=0`.
+
+**Masih ada masalah:**
+
+- Ring buffer tetap sempat hampir penuh: `49130/49152` byte.
+- Terjadi `988 byte` PCM drop.
+- `queue PCM gagal len=1023`.
+- RX mencatat `dropped_frag=2`, `seq_err=1`, `buffer_drop=1`.
+- Jadi buffering membaik dan audio selesai, tetapi burst RX masih sedikit lebih cepat daripada kemampuan jalur queue/playback.
+
+### Kesimpulan v7.0.36
+
+v7.0.36 **berhasil memperbesar headroom audio dan membuat satu turn Gemini selesai sampai drain**, tetapi belum menghilangkan audio drop sepenuhnya.
+
+Masalah sekarang semakin sempit: **RX burst → ring buffer hampir penuh → queue PCM gagal/drop sekitar 20 ms audio**.
+
+Jangan kembali mengubah baseline I2S v6.1.5. Fokus tuning berikutnya tetap pada **RX/audio buffering dan backpressure**, bukan hardware I2S.
+
+**Status: HARDWARE TEST BERHASIL / BUFFER HEADROOM MEMBAIK / DROP PCM MASIH ADA**
 
 ---
 
