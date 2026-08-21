@@ -8,6 +8,137 @@ Dokumen ini mencatat milestone, baseline, perubahan arsitektur penting, hasil ha
 
 ---
 
+## v7.2.1 — Bidirectional Audio Stream Ownership — August 21, 2026
+
+### Dasar perubahan
+
+Hasil audit Tahap 2 menunjukkan jalur audio tidak boleh terus ditangani oleh satu file WebSocket. Kita sepakat mengikuti pola streaming bidirectional Gemini Live:
+
+```text
+AUDIO IN
+INMP441
+  ↓
+audio_stream
+  ↓
+WebSocket TX
+  ↓
+Gemini Live
+
+AUDIO OUT
+Gemini Live
+  ↓
+WebSocket RX worker
+  ↓
+Base64 / PCM decode
+  ↓
+audio_stream output ring
+  ↓
+playback task
+  ↓
+I2S v6.1.5
+  ↓
+MAX98357A
+```
+
+### Perubahan firmware
+
+Dibuat komponen baru:
+
+```text
+components/audio_stream/
+├── CMakeLists.txt
+├── include/audio_stream.h
+└── audio_stream.cpp
+```
+
+Komponen ini sekarang menjadi pemilik jalur audio runtime:
+
+- output ring buffer 48 KiB;
+- playback task;
+- prebuffer 16 KiB;
+- PCM16 alignment/carry;
+- statistik `received → queued → played → dropped`;
+- pending bytes;
+- playback complete/underrun;
+- akses PCM microphone input 16 kHz;
+- volume tetap OFF / forced 100%.
+
+`components/websocket/websocket_audio.cpp` sekarang hanya menjadi **compatibility facade**. File tersebut tidak lagi memiliki ring buffer/playback task sendiri.
+
+`components/websocket/include/websocket_internal.h` diarahkan ke `audio_stream` sebagai pemilik state audio.
+
+`components/websocket/CMakeLists.txt` sekarang membutuhkan `audio_stream`.
+
+`main/main.cpp` tetap mempertahankan alur lama, tetapi pembacaan microphone diarahkan melalui `audio_stream_read_input()`.
+
+### Yang TIDAK diubah
+
+- I2S v6.1.5 tetap LOCKED.
+- INMP441 tetap.
+- MAX98357A tetap.
+- Mic tetap 16 kHz.
+- Speaker tetap 24 kHz.
+- Format PCM16 tetap.
+- WebSocket/TLS lifecycle tidak diubah pada perubahan ini.
+- Baseline test tone tetap dipertahankan.
+
+### Tujuan arsitektur
+
+Tanggung jawab sekarang dipisahkan dengan jelas:
+
+```text
+websocket_rx
+    = transport + RX fragment + decode
+
+websocket_tx
+    = transport + microphone upload
+
+audio_stream
+    = audio IN/OUT runtime + buffer + playback + accounting
+
+audio_hal
+    = hardware I2S / INMP441 / MAX98357A
+```
+
+Dengan pemisahan ini, investigasi berikutnya dapat mengukur satu jalur tanpa mencampur tanggung jawab WebSocket dengan hardware audio.
+
+### Catatan penting
+
+Perubahan ini **belum dianggap membuktikan audio sudah bebas sendat**. Ini adalah perubahan arsitektur untuk membuat jalur streaming dapat diuji secara benar dan terukur.
+
+I2S v6.1.5 tetap tidak boleh dituning ulang berdasarkan dugaan.
+
+### Status
+
+**CODE: SELESAI**
+
+**HARDWARE BUILD/TEST: BELUM DILAKUKAN**
+
+Langkah berikutnya wajib:
+
+1. Build firmware.
+2. Flash hardware.
+3. Pastikan WebSocket tetap stabil.
+4. Uji satu turn Gemini.
+5. Ambil statistik:
+
+```text
+RX fragments
+RX seq_err
+RX buffer_drop
+received
+queued
+played
+pending
+ dropped
+underrun
+PLAYBACK COMPLETE
+```
+
+6. Baru bandingkan dengan log Tahap 2 sebelumnya.
+
+---
+
 ## v7.1.3 — Audio Playback WDT Stabilization — August 20, 2026
 
 ### Dasar perubahan
@@ -606,67 +737,124 @@ Tahap ini BELUM membuktikan apakah PCM berubah atau rusak di antara
 tiga checkpoint.
 
 Kesimpulan Hypothesis B tetap OPEN sampai hasil hardware test tersedia.
-Posisi pengujian kita sekarang
-Dari referensi:
-Tahap 1 — Checkpoint Audit PCM
-AFTER_DECODE
-BEFORE_RING
-BEFORE_I2S
-Tujuannya hanya menyediakan titik pembanding PCM, belum mencari penyebab dengan melakukan patch.
-Tahap 2 — PCM Audit Minimal Audit dipersempit menjadi hanya:
-length
-FNV-1a hash
-peak
-RMS
-Dan format log yang sekarang Mang Qrick kirim sudah sesuai dengan desain Tahap 2, contohnya:
-AFTER_DECODE: len=1022 hash=... peak=... rms=...
-BEFORE_RING:  len=1022 hash=... peak=... rms=...
-BEFORE_I2S:   len=2048 hash=... peak=... rms=...
-Jadi log terbaru ini adalah hasil uji Tahap 2
-Dan justru dari log ini sudah terlihat beberapa hal penting:
-AFTER_DECODE → BEFORE_RING identik
-Contoh:
-AFTER_DECODE: len=1022 hash=842d3526 ...
-BEFORE_RING:  len=1022 hash=842d3526 ...
-Ini bagus. Data PCM tidak berubah pada perpindahan tersebut.
-PCM Gemini memang berubah-ubah amplitudonya
-Ada:
-peak=32767
-peak=32765
-peak=32724
-tetapi juga:
-peak=587
-peak=202
-peak=29
-peak=0
-Jadi memang terdapat chunk dengan amplitudo sangat tinggi sampai silent.
-Masih ada PCM drop di queue
-Contoh:
-Audio PCM drop terukur: 1002 byte
-queue PCM gagal len=1023
-dan:
-Audio PCM drop terukur: 1018 byte
-Ini berbeda dengan hasil v7.1.3 sebelumnya yang dropped=0. Jadi temuan ini harus dicatat, bukan langsung dipatch.
-RX sekarang jelas menunjukkan masalah fragment/sequence
-Pada akhir turn:
-fragments=379
-dropped_frag=138
-seq_err=121
-buffer_drop=17
-Ini sangat berbeda dengan baseline v7.1.3 yang sebelumnya:
-dropped_frag=0
-seq_err=0
-buffer_drop=0
-Jadi hasil terbaru belum bisa dianggap sebagai audio path yang sehat.
-Namun playback akhirnya tetap berhasil drain
-AUDIO PLAYBACK COMPLETE
+
+### HASIL HARDWARE — Tahap 2
+
+Log hardware terbaru menunjukkan:
+
+- `AFTER_DECODE` dan `BEFORE_RING` sering memiliki `len + hash + peak + RMS` yang identik. Ini menunjukkan PCM tidak berubah pada batas decode → ring pada sampel yang sama.
+- Masih terjadi `queue PCM gagal` dan `Audio PCM drop terukur`, sehingga jalur queue belum bersih.
+- RX juga menunjukkan tekanan fragment/sequence pada sesi tersebut (`dropped_frag`, `seq_err`, dan `buffer_drop` meningkat).
+- Playback akhirnya dapat drain sampai `pending=0`, tetapi dengan byte drop yang terukur.
+
+Contoh akhir turn:
+
+```text
 received=226440
 queued=208896
 played=208896
 pending=0
 dropped=17328
-balance=216
-Artinya data yang sudah masuk queue akhirnya berhasil dimainkan sampai pending=0, tetapi ada kehilangan data sebelum/ketika masuk queue.
+```
+
+### Kesimpulan Tahap 2
+
+Tahap 2 **belum membuktikan PCM decode rusak**.
+
+Namun hasil ini juga **belum membuktikan jalur streaming sehat**, karena RX/queue masih kehilangan data.
+
+Karena itu keputusan berikutnya adalah memperbaiki arsitektur jalur streaming terlebih dahulu, bukan mengubah I2S.
+
+---
+
+## v7.2.1 — Keputusan Arsitektur Streaming Bidirectional Gemini Live
+
+Tanggal: 21 Agustus 2026
+
+Keputusan resmi:
+
+```text
+Audio IN dan Audio OUT harus memiliki jalur streaming terpisah,
+sementara WebSocket hanya menangani transport/protokol.
+```
+
+Pembagian tanggung jawab:
+
+```text
+INMP441
+  ↓
+audio_stream
+  ↓
+WebSocket TX
+  ↓
+Gemini Live
+
+Gemini Live
+  ↓
+WebSocket RX worker
+  ↓
+Base64 decode
+  ↓
+audio_stream ring
+  ↓
+audio_playback
+  ↓
+I2S v6.1.5
+  ↓
+MAX98357A
+```
+
+### Implementasi di repo firmware
+
+Dibuat:
+
+```text
+components/audio_stream/CMakeLists.txt
+components/audio_stream/include/audio_stream.h
+components/audio_stream/audio_stream.cpp
+```
+
+Perubahan terkait:
+
+```text
+components/websocket/websocket_audio.cpp
+components/websocket/include/websocket_internal.h
+components/websocket/CMakeLists.txt
+main/main.cpp
+```
+
+`websocket_audio.cpp` sekarang hanya facade kompatibilitas. Pemilik ring buffer, playback task, PCM carry, accounting, dan kontrol audio berada di `audio_stream`.
+
+`main.cpp` tetap memakai alur task microphone yang sama, tetapi akses MIC sekarang melalui `audio_stream_read_input()`.
+
+### Yang tetap LOCKED
+
+- I2S v6.1.5.
+- INMP441.
+- MAX98357A.
+- Mic 16 kHz.
+- Speaker 24 kHz.
+- PCM16.
+
+### Status
+
+**CODE SELESAI — MENUNGGU BUILD/HARDWARE TEST.**
+
+Jangan menyimpulkan audio sudah normal sebelum hasil hardware v7.2.1 tersedia.
+
+Langkah berikutnya:
+
+```text
+BUILD
+ ↓
+FLASH
+ ↓
+1 TURN GEMINI
+ ↓
+RX → audio_stream → I2S statistics
+ ↓
+bandingkan dengan Tahap 2
+```
 
 ---
 
@@ -687,8 +875,6 @@ Firmware berhasil:
 Namun setelah `audio_playback` dibuat, Task WDT muncul sebelum WebSocket Gemini sempat terhubung:
 
 ```text
-WS_AUDIO: Audio playback task ... core=0
-
 task_wdt: - IDLE0
 CPU 0: audio_playback
 ```
