@@ -62,11 +62,72 @@ WebSocket harus bisa mulai normal
 I2S v6.1.5 tetap aman
 ```
 
-### Status
+### Hasil hardware v7.1.3
 
-**TEST BUILD — BELUM BASELINE.**
+Pengujian hardware menunjukkan perubahan scheduler/task playback berhasil memperbaiki masalah WDT dan jalur audio Gemini berjalan normal.
 
-Baseline baru hanya boleh ditetapkan setelah log hardware v7.1.3 membuktikan WDT hilang dan jalur Gemini/audio kembali berjalan normal.
+#### WebSocket/RX stabil
+
+```text
+fragments=115 dropped_frag=0 messages=23 queue_hwm=3 seq_err=0 buffer_drop=0 queue_drop=0 invalid=0 oversize=0
+```
+
+Selama turn audio yang diuji:
+
+- `dropped_frag=0`
+- `seq_err=0`
+- `buffer_drop=0`
+- `queue_drop=0`
+- `invalid=0`
+- `oversize=0`
+
+Ini merupakan perbaikan besar dibanding v7.1.1 yang sebelumnya mencapai `dropped_frag=154`, `seq_err=144`, dan `buffer_drop=10`.
+
+#### Audio playback berhasil drain
+
+```text
+WS_JSON: AUDIO SUMMARY: chunks=95 received=97859 played=77824 pending=18918 write_calls=38
+WS_AUDIO: AUDIO FLOW: pending=2534/49152 received=97859 queued=98790 played=96256 dropped=0
+WS_AUDIO: AUDIO PLAYBACK COMPLETE: received=97859 queued=98790 played=98790 pending=0 dropped=0 balance=-931
+```
+
+Hasil penting:
+
+- `dropped=0`
+- `pending=0` setelah playback selesai
+- `played=98790` sama dengan `queued=98790`
+- `AUDIO PLAYBACK COMPLETE` berhasil
+- Tidak muncul `AUDIO PLAYBACK UNDERRUN` pada turn ini
+
+#### Task WDT
+
+Tidak ditemukan lagi log:
+
+```text
+task_wdt: Task watchdog got triggered
+```
+
+pada `audio_playback` selama pengujian v7.1.3 yang dikirim.
+
+### Analisis
+
+v7.1.3 berhasil menghilangkan masalah starvation yang sebelumnya membuat `audio_playback` mengganggu scheduler. Jalur Gemini → RX → audio ring → speaker sekarang dapat menyelesaikan satu turn tanpa PCM drop dan tanpa WDT.
+
+I2S v6.1.5 tetap tidak disentuh.
+
+### Catatan yang masih perlu diuji
+
+Heap terbesar sempat turun dari sekitar 31 KB menjadi sekitar 15 KB ketika RX/audio sedang sibuk. Ini belum menunjukkan kegagalan, tetapi margin heap perlu dipantau pada pengujian multi-turn.
+
+Karena hasil ini baru menunjukkan satu turn yang bersih, **v7.1.3 belum ditetapkan sebagai baseline final**. Pengujian berikutnya sebaiknya berupa beberapa turn/percakapan berturut-turut tanpa mengubah I2S.
+
+### Keputusan
+
+Jangan melakukan tuning I2S lagi berdasarkan log ini.
+
+Jangan menambahkan audio control, UART, servo, atau fitur JSON baru sebelum stabilitas multi-turn v7.1.3 dibuktikan.
+
+**Status: HASIL HARDWARE BERHASIL / BELUM BASELINE FINAL**
 
 ---
 
