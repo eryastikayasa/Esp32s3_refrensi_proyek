@@ -492,6 +492,121 @@ length + hash + peak + RMS
 Tujuannya nanti bukan sekadar melihat log, tetapi membandingkan karakteristik PCM CP1, CP2, dan CP3 untuk mengetahui apakah datanya berubah di antara checkpoint.
 Catatan ini menjadi baseline. Jangan mengubah Tahap 1 lagi kecuali ditemukan masalah.
 
+## Hypothesis B — Tahap 2: PCM Audit Minimal
+**Tanggal:** 21 Agustus 2026
+**Branch:** `test/v7.1.3-hypothesis-b-pcm-audit`
+**Status:** CODE SELESAI — BUILD/HARDWARE TEST BELUM
+
+### Tujuan
+Melanjutkan Hypothesis B dengan audit PCM minimal pada tiga checkpoint yang
+sudah dipasang pada Tahap 1.
+
+### Tiga Checkpoint
+1. `AFTER_DECODE`
+   - PCM hasil decode Gemini sebelum masuk ke audio queue.
+
+2. `BEFORE_RING`
+   - PCM tepat sebelum masuk ke audio ring buffer.
+
+3. `BEFORE_I2S`
+   - PCM tepat sebelum diproses oleh `audio_write_speaker()`.
+
+### Audit Tahap 2
+Audit PCM disederhanakan menjadi hanya empat metrik:
+
+- `length`
+- `FNV-1a hash`
+- `peak`
+- `RMS`
+
+Contoh format log:
+
+AFTER_DECODE: len=... hash=... peak=... rms=...
+BEFORE_RING:  len=... hash=... peak=... rms=...
+BEFORE_I2S:   len=... hash=... peak=... rms=...
+
+### Alasan Penyederhanaan
+Audit sebelumnya terlalu agresif dan menghasilkan terlalu banyak informasi/log.
+
+Tahap 2 sengaja dibuat minimal agar:
+- overhead logging lebih kecil;
+- jalur audio tidak terganggu;
+- perbandingan antar-checkpoint lebih mudah;
+- fokus utama adalah mengetahui apakah PCM berubah di antara
+  DECODE → RING → I2S.
+
+### Perubahan Kode
+Perubahan hanya dilakukan pada fungsi audit PCM di:
+
+`components/websocket/websocket_audio.cpp`
+
+Metric tambahan yang sebelumnya ada, seperti:
+- min
+- max
+- mean_abs
+- zero count
+- first sample
+- last sample
+- warning FULL-SCALE
+- warning SILENT PCM
+
+dihapus dari audit Stage 2.
+
+### Yang TIDAK Diubah
+Tahap 2 tidak mengubah:
+- sample PCM;
+- format audio;
+- sample rate;
+- I2S;
+- ring buffer;
+- WebSocket;
+- decoding;
+- playback logic;
+- `audio_write_speaker()`.
+
+I2S v6.1.5 tetap LOCKED.
+
+### Commit
+`62972a4cd31865dd8dd3f97dd7753a4718910f0a`
+
+Commit message:
+
+`test: simplify Hypothesis B PCM audit to Stage 2 minimal metrics`
+
+### Status
+[✓] Referensi CHANGELOG_PROJECT.md sudah diperiksa
+[✓] Branch Hypothesis B v7.1.3 digunakan
+[✓] CP1/CP2/CP3 sudah terpasang dari Tahap 1
+[✓] Audit minimal Tahap 2 selesai
+[✓] Commit Tahap 2 dibuat
+[ ] Build belum dilakukan
+[ ] Flash/hardware test belum dilakukan
+[ ] Log tiga checkpoint belum dianalisis
+
+### Aturan Tahap Berikutnya
+Jangan langsung mengubah logika audio berdasarkan dugaan.
+
+Langkah berikutnya adalah:
+
+1. Build firmware.
+2. Pastikan build berhasil.
+3. Flash ke hardware.
+4. Jalankan satu sesi playback Gemini.
+5. Ambil log:
+   - AFTER_DECODE
+   - BEFORE_RING
+   - BEFORE_I2S
+6. Bandingkan `length + hash + peak + RMS`.
+7. Baru tarik kesimpulan berdasarkan data.
+
+### Kesimpulan Sementara
+Tahap 2 baru membuktikan bahwa mekanisme AUDIT MINIMAL sudah dipasang.
+
+Tahap ini BELUM membuktikan apakah PCM berubah atau rusak di antara
+tiga checkpoint.
+
+Kesimpulan Hypothesis B tetap OPEN sampai hasil hardware test tersedia.
+
 ---
 
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
