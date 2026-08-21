@@ -248,6 +248,208 @@ Catatan penting:
 I2S v6.1.5 tetap LOCKED.
 Jangan mengubah konfigurasi hardware/output selama pengujian Hipotesis B.
 
+## Hipotesis B — Hasil Analisis V7.1.3
+
+### Status
+DIAGNOSIS BELUM FINAL — JANGAN PATCH DULU
+
+### Tujuan Pengujian
+Mencari penyebab audio Gemini Live yang berpotensi tersendat dengan memeriksa jalur:
+
+Gemini → WebSocket RX → Base64 Decode → PCM16 → Ring Buffer → I2S → MAX98357A
+
+### Hasil Pengamatan
+
+1. WebSocket RX TERLIHAT SEHAT
+- dropped_frag = 0
+- seq_err = 0
+- buffer_drop = 0
+- queue_drop = 0
+- invalid = 0
+- oversize = 0
+- queue_hwm hanya sekitar 1–2
+- Tidak ditemukan indikasi kehilangan fragment WebSocket.
+
+KESIMPULAN:
+WebSocket packet/fragment loss bukan tersangka utama berdasarkan log ini.
+
+2. PCM dari Gemini BERHASIL DITERIMA
+- Terdapat AUDIO GEMINI dengan ukuran PCM seperti 5760 byte, 1920 byte, dll.
+- PCM memiliki nilai min/max/RMS yang valid.
+- Data bukan hanya PCM kosong/silent.
+
+KESIMPULAN:
+Base64 decode → PCM16 berhasil menghasilkan data audio.
+
+3. Ring Buffer TIDAK MENUNJUKKAN DROP
+Contoh hasil akhir:
+
+received = 116160 byte
+queued   = 116050 byte
+played   = 116050 byte
+dropped  = 0 byte
+pending  = 0
+
+Selisih received vs queued hanya 110 byte.
+
+KESIMPULAN:
+Tidak ada bukti ring buffer membuang audio secara signifikan.
+Ring buffer bukan tersangka utama berdasarkan accounting ini.
+
+4. Playback BERHASIL MENGHABISKAN SELURUH AUDIO
+Log akhir:
+
+AUDIO PLAYBACK COMPLETE
+received=116160
+queued=116050
+played=116050
+pending=0
+dropped=0
+
+KESIMPULAN:
+Seluruh audio yang masuk ke jalur playback berhasil dikonsumsi.
+Tidak ditemukan underflow/drop permanen dari accounting audio.
+
+5. Producer AUDIO SEMPAT LEBIH CEPAT DARIPADA PLAYBACK
+Contoh:
+
+pending=17324/49152
+pending=20866/49152
+pending=24408/49152
+
+Artinya audio dari Gemini datang secara burst dan sempat menumpuk di buffer.
+
+Namun buffer akhirnya kembali:
+
+pending=0
+
+KESIMPULAN:
+Ada perbedaan timing producer vs playback, tetapi belum terbukti sebagai penyebab audio tersendat.
+
+6. TEMUAN PALING MENCURIGAKAN — PCM FULL-SCALE
+Banyak audit PCM menunjukkan:
+
+peak=32767
+peak=32768
+
+Bahkan berulang kali muncul:
+
+FULL-SCALE PCM peak=32767
+FULL-SCALE PCM peak=32768
+
+Nilai tersebut muncul pada BEFORE_RING maupun BEFORE_I2S.
+
+Selain itu amplitudo PCM berubah sangat ekstrem antar chunk:
+- full-scale sekitar ±32768
+- medium amplitude
+- amplitude sangat kecil
+- bahkan silent PCM
+
+KESIMPULAN:
+Perlu investigasi lebih lanjut apakah:
+A. Audio Gemini memang mengalami clipping/peak ekstrem,
+atau
+B. Ada perubahan/distorsi PCM pada jalur decode/copy/ring.
+
+Belum boleh menyimpulkan penyebab sebelum data PCM dibandingkan antar titik.
+
+7. RX PROCESS MEMPUNYAI LATENCY YANG PERLU DIPERHATIKAN
+Beberapa contoh:
+
+RX PROCESS len=277  time=21 ms
+RX PROCESS len=7888 time=36 ms
+
+Latency ini perlu diperiksa karena sistem audio berjalan real-time.
+
+Namun logging audit PCM sendiri sangat berat dan kemungkinan ikut menambah beban CPU/UART.
+
+KESIMPULAN:
+Latency belum dapat dinyatakan sebagai penyebab utama sebelum pengujian dilakukan dengan logging minimal.
+
+8. PCM AUDIT LOGGING TERLALU AGRESIF
+Log menghasilkan sangat banyak informasi:
+
+min
+max
+peak
+rms
+mean_abs
+zero
+hash
+first
+last
+
+dan dicetak sangat rapat.
+
+Pada monitor 115200 baud, logging sebanyak ini berpotensi mengganggu timing sistem.
+
+KESIMPULAN:
+Pengujian berikutnya harus menggunakan logging minimal agar hasil timing audio tidak terkontaminasi oleh overhead debug.
+
+### Yang SUDAH DIBEBASKAN DARI KECURIGAAN
+
+- WebSocket fragment loss: tidak terbukti
+- WebSocket queue drop: tidak terbukti
+- Ring buffer drop: tidak terbukti
+- Audio playback accounting: normal
+- I2S baseline v6.1.5: JANGAN DIUBAH
+
+### Fokus Investigasi Berikutnya
+
+Perlu membandingkan PCM pada tiga titik:
+
+1. PCM tepat setelah Base64 decode
+2. PCM sebelum masuk ring buffer (BEFORE_RING)
+3. PCM setelah keluar ring buffer tepat sebelum I2S (BEFORE_I2S)
+
+Setiap titik harus dibandingkan menggunakan:
+
+- length
+- sample count
+- min
+- max
+- peak
+- RMS
+- hash
+
+Tujuan:
+Memastikan apakah PCM berubah antara:
+
+DECODE → RING → I2S
+
+### Hipotesis Kerja Saat Ini
+
+Hipotesis B BELUM TERBUKTI sebagai masalah WebSocket atau buffer overflow.
+
+Tersangka utama sementara:
+
+1. Integritas/transformasi PCM
+2. Pola full-scale PCM yang berulang
+3. Timing RX/decode
+4. Overhead logging yang sangat berat
+
+### Aturan Eksperimen
+
+JANGAN mengubah I2S baseline v6.1.5.
+
+JANGAN melakukan patch berdasarkan log ini saja.
+
+Lakukan satu perubahan/eksperimen pada satu waktu.
+
+Sebelum perubahan kode:
+- wajib mencari/membaca CHANGELOG_PROJECT.md pada repositori referensi terlebih dahulu.
+- Setelah eksperimen selesai, hasil harus dicatat kembali agar riwayat diagnosis tidak hilang.
+
+### Status Akhir Hipotesis B
+
+BELUM TERBUKTI.
+
+Kesimpulan sementara:
+Jalur WebSocket dan ring buffer terlihat sehat. Audio PCM berhasil diterima dan seluruh audio berhasil dimainkan. Anomali utama yang perlu dibedah adalah pola PCM FULL-SCALE yang berulang, kemungkinan transformasi PCM, latency RX/decode, dan efek logging debug yang terlalu berat.
+
+NEXT STEP:
+Audit integritas PCM dari DECODE → BEFORE_RING → BEFORE_I2S dengan logging minimal.
+
 ---
 
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
