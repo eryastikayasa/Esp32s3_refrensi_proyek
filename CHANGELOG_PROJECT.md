@@ -450,6 +450,48 @@ Jalur WebSocket dan ring buffer terlihat sehat. Audio PCM berhasil diterima dan 
 NEXT STEP:
 Audit integritas PCM dari DECODE → BEFORE_RING → BEFORE_I2S dengan logging minimal.
 
+### CATATAN PROGRES — HIPOTESIS B
+Tahap 1 — PCM 3 Checkpoint Audit
+Status: ✅ SELESAI
+Versi acuan: V7.1.3
+Branch: Hipotesis B
+File yang diubah: components/websocket/websocket_audio.cpp
+Tujuan Tahap 1
+Memastikan tersedia 3 titik pengamatan PCM tanpa mengubah logika audio.
+Checkpoint
+Lokasi
+Fungsi
+CP1 — AFTER_DECODE
+Setelah PCM hasil decode diterima jalur audio
+Melihat PCM paling awal
+CP2 — BEFORE_RING
+Tepat sebelum PCM masuk ring buffer
+Memastikan PCM sebelum ring
+CP3 — BEFORE_I2S
+Tepat sebelum audio_write_speaker()
+Memastikan PCM sebelum I2S
+Prinsip perubahan
+✅ Hanya untuk audit/diagnostik
+✅ Tidak mengubah sample PCM
+✅ Tidak mengubah ukuran/urutan PCM
+✅ Tidak mengubah ring buffer
+✅ Tidak mengubah playback
+✅ I2S v6.1.5 tetap LOCKED
+✅ Tidak mengubah logika audio utama
+Commit Tahap 1
+8d185e89e9eb16218a10a65723e2fd8acc0ddc84
+Pesan commit:
+test: add PCM checkpoint 1 for Hypothesis B
+Commit tersebut mencatat penambahan CP1 AFTER_DECODE dan mempertahankan CP2/CP3 yang sudah ada.
+Kesimpulan Tahap 1
+Tiga checkpoint PCM sekarang sudah tersedia sebagai jalur observasi: CP1 → CP2 → CP3.
+Belum ada kesimpulan bahwa PCM rusak di titik tertentu. Tahap 1 hanya menyiapkan alat pengamatan.
+Berikutnya
+Tahap 2 — Desain audit minimal:
+length + hash + peak + RMS
+Tujuannya nanti bukan sekadar melihat log, tetapi membandingkan karakteristik PCM CP1, CP2, dan CP3 untuk mengetahui apakah datanya berubah di antara checkpoint.
+Catatan ini menjadi baseline. Jangan mengubah Tahap 1 lagi kecuali ditemukan masalah.
+
 ---
 
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
