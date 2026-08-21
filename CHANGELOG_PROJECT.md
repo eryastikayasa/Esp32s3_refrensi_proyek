@@ -129,6 +129,86 @@ Jangan menambahkan audio control, UART, servo, atau fitur JSON baru sebelum stab
 
 **Status: HASIL HARDWARE BERHASIL / BELUM BASELINE FINAL**
 
+### Arah Investigasi Audio Berikutnya — WAJIB DIPERTAHANKAN
+
+Hasil v7.1.3 menunjukkan jalur **Gemini → RX → decoder → audio ring → playback** sudah menerima dan memainkan data tanpa `dropped=0`, `pending=0`, dan playback dapat selesai. Namun suara dari speaker masih belum jelas. Karena itu investigasi berikutnya dibagi menjadi **dua hipotesis berurutan** dan tidak boleh dicampur.
+
+#### Hipotesis A — PCM Gemini sudah bagus, tetapi output MAX98357A bermasalah
+
+Ini adalah **hipotesis pertama yang harus diuji**.
+
+Tujuan:
+
+```text
+PCM test tone lokal
+    ↓
+I2S v6.1.5
+    ↓
+MAX98357A
+    ↓
+speaker
+```
+
+Jika test tone lokal terdengar **jernih, normal, dan stabil**, maka jalur I2S + MAX98357A dianggap normal untuk sementara dan investigasi berpindah ke Hipotesis B.
+
+Jika test tone lokal juga terdengar **pecah, serak, pelan, atau tidak jelas**, jangan menyalahkan PCM Gemini. Fokus tetap pada jalur:
+
+```text
+I2S → MAX98357A → speaker
+```
+
+**Aturan penting:** konfigurasi I2S v6.1.5 tetap LOCKED selama pengujian ini. Jangan melakukan tuning I2S secara acak.
+
+#### Hipotesis B — PCM Gemini berubah/terkorupsi sebelum sampai I2S
+
+Hipotesis ini **baru boleh diperiksa setelah Hipotesis A terbukti normal**.
+
+Yang perlu diperiksa nanti:
+
+```text
+Gemini Base64
+    ↓
+Base64 decode
+    ↓
+PCM16
+    ↓
+queue_audio_pcm()
+    ↓
+audio ring
+    ↓
+audio_write_speaker()
+    ↓
+I2S
+```
+
+Pemeriksaan yang direncanakan:
+
+- ukuran PCM hasil decode;
+- sample min/max;
+- peak/RMS sederhana;
+- pola sample PCM;
+- kemungkinan byte order/format yang salah;
+- memastikan data PCM yang keluar dari decoder sama dengan data yang benar-benar diberikan ke jalur I2S.
+
+### Urutan keputusan untuk versi berikutnya
+
+```text
+V7.1.3
+  ↓
+TES A: test tone lokal → MAX98357A
+  ↓
+Apakah speaker normal?
+  ├─ TIDAK → investigasi I2S/MAX98357A/speaker
+  │          tanpa menyentuh PCM Gemini
+  │
+  └─ YA → lanjut TES B
+             ↓
+       audit PCM Gemini
+       Base64 → PCM16 → ring → I2S
+```
+
+**Keputusan:** dua hipotesis ini menjadi peta investigasi resmi untuk versi berikutnya agar troubleshooting tidak kembali ke awal dan tidak melakukan perubahan pada bagian yang sudah terbukti stabil.
+
 ---
 
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
