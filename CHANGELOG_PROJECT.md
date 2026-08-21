@@ -209,6 +209,45 @@ Apakah speaker normal?
 
 **Keputusan:** dua hipotesis ini menjadi peta investigasi resmi untuk versi berikutnya agar troubleshooting tidak kembali ke awal dan tidak melakukan perubahan pada bagian yang sudah terbukti stabil.
 
+### Hasil Pengujian Hipotesis A — PASS
+
+Test:
+PCM 1 kHz lokal
+→ I2S v6.1.5
+→ MAX98357A
+→ Speaker
+
+Hasil:
+- 10/10 test tone berhasil.
+- Suara speaker JERNIH dan BERSIH.
+- Tidak ditemukan gangguan pada jalur output saat test tone.
+- Tidak ada Gemini/WebSocket/Wi-Fi pada pengujian.
+- I2S v6.1.5 tetap LOCKED dan tidak diubah.
+
+Kesimpulan:
+Hipotesis A tidak terbukti sebagai sumber masalah.
+Jalur I2S v6.1.5 → MAX98357A → speaker dinyatakan normal.
+
+Keputusan berikutnya:
+Lanjut ke Hipotesis B.
+
+Hipotesis B:
+Audit jalur audio Gemini:
+Gemini PCM/Base64
+→ decode
+→ PCM16
+→ audio buffer/ring
+→ audio_write_speaker()
+→ I2S v6.1.5
+
+Fokus:
+Memastikan PCM dari Gemini tidak berubah, korup,
+salah format, salah ukuran, atau rusak sebelum masuk I2S.
+
+Catatan penting:
+I2S v6.1.5 tetap LOCKED.
+Jangan mengubah konfigurasi hardware/output selama pengujian Hipotesis B.
+
 ---
 
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
