@@ -606,6 +606,67 @@ Tahap ini BELUM membuktikan apakah PCM berubah atau rusak di antara
 tiga checkpoint.
 
 Kesimpulan Hypothesis B tetap OPEN sampai hasil hardware test tersedia.
+Posisi pengujian kita sekarang
+Dari referensi:
+Tahap 1 — Checkpoint Audit PCM
+AFTER_DECODE
+BEFORE_RING
+BEFORE_I2S
+Tujuannya hanya menyediakan titik pembanding PCM, belum mencari penyebab dengan melakukan patch.
+Tahap 2 — PCM Audit Minimal Audit dipersempit menjadi hanya:
+length
+FNV-1a hash
+peak
+RMS
+Dan format log yang sekarang Mang Qrick kirim sudah sesuai dengan desain Tahap 2, contohnya:
+AFTER_DECODE: len=1022 hash=... peak=... rms=...
+BEFORE_RING:  len=1022 hash=... peak=... rms=...
+BEFORE_I2S:   len=2048 hash=... peak=... rms=...
+Jadi log terbaru ini adalah hasil uji Tahap 2
+Dan justru dari log ini sudah terlihat beberapa hal penting:
+AFTER_DECODE → BEFORE_RING identik
+Contoh:
+AFTER_DECODE: len=1022 hash=842d3526 ...
+BEFORE_RING:  len=1022 hash=842d3526 ...
+Ini bagus. Data PCM tidak berubah pada perpindahan tersebut.
+PCM Gemini memang berubah-ubah amplitudonya
+Ada:
+peak=32767
+peak=32765
+peak=32724
+tetapi juga:
+peak=587
+peak=202
+peak=29
+peak=0
+Jadi memang terdapat chunk dengan amplitudo sangat tinggi sampai silent.
+Masih ada PCM drop di queue
+Contoh:
+Audio PCM drop terukur: 1002 byte
+queue PCM gagal len=1023
+dan:
+Audio PCM drop terukur: 1018 byte
+Ini berbeda dengan hasil v7.1.3 sebelumnya yang dropped=0. Jadi temuan ini harus dicatat, bukan langsung dipatch.
+RX sekarang jelas menunjukkan masalah fragment/sequence
+Pada akhir turn:
+fragments=379
+dropped_frag=138
+seq_err=121
+buffer_drop=17
+Ini sangat berbeda dengan baseline v7.1.3 yang sebelumnya:
+dropped_frag=0
+seq_err=0
+buffer_drop=0
+Jadi hasil terbaru belum bisa dianggap sebagai audio path yang sehat.
+Namun playback akhirnya tetap berhasil drain
+AUDIO PLAYBACK COMPLETE
+received=226440
+queued=208896
+played=208896
+pending=0
+dropped=17328
+balance=216
+Artinya data yang sudah masuk queue akhirnya berhasil dimainkan sampai pending=0, tetapi ada kehilangan data sebelum/ketika masuk queue.
 
 ---
 
