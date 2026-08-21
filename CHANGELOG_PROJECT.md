@@ -8,6 +8,68 @@ Dokumen ini mencatat milestone, baseline, perubahan arsitektur penting, hasil ha
 
 ---
 
+## v7.1.3 — Audio Playback WDT Stabilization — August 20, 2026
+
+### Dasar perubahan
+
+v7.1.2 menunjukkan `audio_playback` membuat CPU0/IDLE0 starvation sebelum WebSocket Gemini sempat berjalan. Task WDT muncul berulang pada CPU0 dengan:
+
+```text
+task_wdt: - IDLE0
+CPU 0: audio_playback
+```
+
+Karena masalah muncul sebelum WebSocket terhubung, v7.1.3 difokuskan hanya pada scheduler/task playback.
+
+### Perubahan firmware
+
+File utama:
+
+```text
+components/websocket/websocket_audio.cpp
+```
+
+Perubahan:
+
+- Priority task `audio_playback` diturunkan dari **7 menjadi 3**.
+- Task tetap pinned ke **CPU0** untuk pengujian terkontrol.
+- Ditambahkan `vTaskDelay(1)` sebagai yield scheduler setelah setiap siklus playback.
+- Jalur ketika buffer kosong juga memberi kesempatan scheduler.
+- `audio_clear_pending` tidak lagi menunggu mutex dengan `portMAX_DELAY`; digunakan timeout pendek **10 ms**.
+- Jika mutex sedang sibuk, proses clear ditunda dan task melakukan yield.
+
+### Yang TIDAK diubah
+
+- I2S v6.1.5 tetap LOCKED.
+- INMP441 tetap.
+- MAX98357A tetap.
+- Mic tetap 16 kHz.
+- Speaker tetap 24 kHz.
+- Format PCM tetap.
+- DMA/I2S configuration tidak diubah.
+- WebSocket/TLS tidak diubah.
+- Ring buffer tidak diubah.
+- Volume processing tetap OFF / forced 100%.
+- OLED tetap OFF selama audio stability test.
+
+### Tujuan hardware test
+
+Menguji satu hipotesis secara terisolasi:
+
+```text
+audio_playback tidak boleh membuat IDLE0 starvation
+WebSocket harus bisa mulai normal
+I2S v6.1.5 tetap aman
+```
+
+### Status
+
+**TEST BUILD — BELUM BASELINE.**
+
+Baseline baru hanya boleh ditetapkan setelah log hardware v7.1.3 membuktikan WDT hilang dan jalur Gemini/audio kembali berjalan normal.
+
+---
+
 ## v7.1.2 — Audio Playback WDT Investigation — August 20, 2026
 
 ### Hasil hardware
@@ -464,109 +526,3 @@ Jadi v7.0.34 adalah **perbaikan scheduling**, bukan perubahan timing/data format
 ### Hasil hardware v7.0.34
 
 Pada pengujian ini perangkat **belum mencoba berbicara**.
-
-Yang berhasil:
-
-- Wi-Fi/DNS/TCP 443 OK.
-- WebSocket/TLS OK.
-- Gemini `setupComplete` OK.
-- Session resumption tetap OK.
-- RX message berjalan sampai 21 message.
-- Tidak muncul `task_wdt` pada `audio_playback`.
-
-Yang masih gagal:
-
-```text
-transport_poll_write(0)
-esp_websocket_client: esp_transport_write() returned 0
-WS_EVENT: WebSocket Error!
-WebSocket TERPUTUS dari Gemini
-```
-
-Setelah disconnect baru muncul timeout TX audio. Jadi timeout audio tersebut dianggap **efek setelah koneksi mati**, bukan penyebab pertama.
-
-**Status: superseded by v7.0.35.**
-
----
-
-## v7.0.35 — Idle Microphone TX Gate — August 20, 2026
-
-### Alasan perubahan
-
-Log v7.0.34 menunjukkan koneksi mati pada `transport_poll_write(0)` walaupun user belum berbicara.
-
-Source code kemudian dicek. `audio_task` ternyata tetap membaca INMP441 dan mengirim frame PCM 3200 byte ke TX queue setelah Gemini `setupComplete`, sehingga perangkat dapat terus melakukan audio TX saat kondisi idle/senyap.
-
-Ini menjadi jalur yang perlu diisolasi sebelum mengubah WebSocket transport lebih jauh.
-
-### Perubahan
-
-Di `main/main.cpp` ditambahkan gate aktivitas PCM16:
-
-```text
-Frame mic 3200 byte
-       ↓
-cek aktivitas sample
-       ↓
-senyap → tidak dikirim
-aktif → kirim seperti biasa
-```
-
-Parameter diagnosis:
-
-```text
-SILENCE_THRESHOLD = 700
-MIN_ACTIVE_SAMPLES = 8
-```
-
-Frame senyap hanya dibuang dari TX. I2S/audio hardware tidak disentuh.
-
-Ditambahkan log periodik:
-
-```text
-V7.0.35 MIC TX gate: silent frames dropped=...
-```
-
-### Keputusan
-
-Gate ini dipakai sebagai **diagnostic isolation**, bukan fitur final voice activity detection.
-
-**Status: superseded by v7.0.36.**
-
----
-
-## v7.0.36 — Idle Microphone TX Gate Validation — August 20, 2026
-
-### Hasil hardware
-
-Gate frame mic senyap tetap berhasil bekerja. Log menunjukkan frame senyap terus dibuang:
-
-```text
-V7.0.36 MIC TX gate: silent frames dropped=...
-```
-
-Gemini berhasil setup dan menghasilkan audio sampai `TURN COMPLETE`. Audio berhasil drain sampai `pending=0`.
-
-Namun masih terlihat tekanan pada RX/audio buffer:
-
-```text
-dropped_frag=154
-seq_err=144
-buffer_drop=10
-```
-
-dan audio drop kumulatif:
-
-```text
-dropped=7012 byte
-```
-
-Satu `AUDIO PLAYBACK UNDERRUN` juga masih terjadi.
-
-### Kesimpulan
-
-v7.0.36 membuktikan gate mic idle membantu mengisolasi jalur TX, tetapi **belum menjadi baseline audio final** karena RX fragment pressure, queue drop, dan underrun masih ada.
-
-**Status: HASIL HARDWARE / BELUM BASELINE FINAL**
-
----
